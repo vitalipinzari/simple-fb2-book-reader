@@ -5,36 +5,27 @@ breaking and hyphenation for English and Russian, turns pages with a 3D page cur
 themes, and can dig books out of an unsorted *Downloads* folder by file name, title, author or a phrase from
 the text.
 
-ai folder contains full prompt with detailed spec description for any AI model you would like to use,
-on any effort level, to generate application code and build it for platforms, technology and tools descibed below.
-In new era of AI, I do not see any value to provide code itself, I believe that detailed promt is enough.
-As an example I'm providing you metrics from Claude Code for code generation and build from final prompt:
-Code genaration and build date: 2026-11-03, on Opus 5.5 at low effort.
-┌──────────────────────────────────────────┬──────────────────────────────────────────────────────────────┐
-│                  Metric                  │                            Value                             │
-├──────────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ From your prompt to the final report     │ 14 min 15 s (11:16:04 → 11:30:19 local)                      │
-├──────────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ Whole session open (including idle time) │ 43 min                                                       │
-├──────────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ Cost (API-equivalent)                    │ $11.50 (Opus $11.495, Haiku $0.006)                          │
-├──────────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ Model API time / tool run time           │ 28.4 min / 7.6 min (summed across parallel agents)           │
-├──────────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ Agents                                   │ 1 main thread + 12 subagents (up to 9 running at once)       │
-├──────────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ Model responses                          │ 145 (main 26, subagents 119)                                 │
-├──────────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ Tool calls                               │ 194 (main 20, subagents 174)                                 │
-├──────────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ Failed tool calls                        │ 2                                                            │
-├──────────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ Lines added / removed (Write and Edit)   │ 9,787 / 10                                                   │
-├──────────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ Output tokens                            │ 225k (plus 9k thinking)                                      │
-├──────────────────────────────────────────┼──────────────────────────────────────────────────────────────┤
-│ Input tokens                             │ 9.13M read from cache, 0.99M written to cache, 1.4k uncached │
-└──────────────────────────────────────────┴──────────────────────────────────────────────────────────────┘
+The [`ai`](ai) folder contains the full prompt, with a detailed spec, for any AI model you would like to use, at
+any effort level, to generate the application code and build it for the platforms, technology and tools described
+below. In the new era of AI I do not see much value in providing the code itself; I believe a detailed prompt is
+enough.
+
+As an example, here are the Claude Code metrics for generating the code and building it from the final prompt
+(2026-11-03, Opus 5.5 at low effort):
+
+| Metric | Value |
+|---|---|
+| From the prompt to the final report | 14 min 15 s (11:16:04 → 11:30:19 local) |
+| Whole session open (including idle time) | 43 min |
+| Cost (API-equivalent) | $11.50 (Opus $11.495, Haiku $0.006) |
+| Model API time / tool run time | 28.4 min / 7.6 min (summed across parallel agents) |
+| Agents | 1 main thread + 12 subagents (up to 9 running at once) |
+| Model responses | 145 (main 26, subagents 119) |
+| Tool calls | 194 (main 20, subagents 174) |
+| Failed tool calls | 2 |
+| Lines added / removed (Write and Edit) | 9,787 / 10 |
+| Output tokens | 225k (plus 9k thinking) |
+| Input tokens | 9.13M read from cache, 0.99M written to cache, 1.4k uncached |
 
 It runs on **Windows 11 x64** and **Android** (phones, tablets, Chromebooks) from one C++20 code base:
 SDL3, a portable core, and shaders written for both OpenGL 4.1 core and OpenGL ES 3.0.
