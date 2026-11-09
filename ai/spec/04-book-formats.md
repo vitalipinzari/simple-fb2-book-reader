@@ -1,6 +1,6 @@
 # 04 — Book formats: FB2, TXT, zip and the book loader
 
-This file specifies three translation units that turn the bytes of a book file into the in-memory model. `src/core/Fb2Parser.cpp` converts FictionBook 2 into a `Document`, and also provides a metadata fast path and plain-text extraction. `src/core/TxtParser.cpp` converts plain text into a `Document`, rebuilding paragraphs, headings and typography, and guesses title and author from the file name. `src/core/BookLoader.cpp` covers UTF-8 paths, file-name rules, reading files, unpacking zip archives with miniz, the `loadBook*` entry points and `bookFingerprint`. The verbatim headers `Fb2Parser.h`, `TxtParser.h` and `BookLoader.h` hold the declarations, and `Document.h` holds the data model; this file does not restate them. The helpers these files call (`Unicode.h`, `Encoding.h`, `XmlReader.h` and `Document::finalize()`) are specified in `03-core-foundation.md`. `probeImageSize` is declared in `ImageCodec.h`. All code lives in namespace `ll`, and a helper called "file-local" sits in an unnamed namespace in its `.cpp`. Unless stated otherwise, string comparisons are exact and case-sensitive on bytes, a "size" or "length" is in bytes, and a length "in code points" means `utf8Length`.
+This file specifies three translation units that turn the bytes of a book file into the in-memory model. `src/core/Fb2Parser.cpp` converts FictionBook 2 into a `Document`, and also provides a metadata fast path and plain-text extraction. `src/core/TxtParser.cpp` converts plain text into a `Document`, rebuilding paragraphs, headings and typography, and guesses title and author from the file name. `src/core/BookLoader.cpp` covers UTF-8 paths, file-name rules, reading files, unpacking zip archives with miniz, the `loadBook*` entry points and `bookFingerprint`; it also recognises PDF files and hands them to the PDF reader, whose four translation units are specified in `15-pdf.md` (only the calls are described here). The verbatim headers `Fb2Parser.h`, `TxtParser.h` and `BookLoader.h` hold the declarations, and `Document.h` holds the data model; this file does not restate them. The helpers these files call (`Unicode.h`, `Encoding.h`, `XmlReader.h` and `Document::finalize()`) are specified in `03-core-foundation.md`. `probeImageSize` is declared in `ImageCodec.h`. All code lives in namespace `ll`, and a helper called "file-local" sits in an unnamed namespace in its `.cpp`. Unless stated otherwise, string comparisons are exact and case-sensitive on bytes, a "size" or "length" is in bytes, and a length "in code points" means `utf8Length`.
 
 ---
 
@@ -969,7 +969,7 @@ Tail:
 
 ### C.1 Includes and constants
 
-Includes: `core/BookLoader.h`, `<miniz.h>` (miniz 3 from vcpkg), `<algorithm>`, `<cstdio>`, `<cstring>`, `<fstream>`, `core/Fb2Parser.h`, `core/TxtParser.h`, `core/Unicode.h`.
+Includes: `core/BookLoader.h`, `<miniz.h>` (miniz 3 from vcpkg), `<algorithm>`, `<cstdio>`, `<cstring>`, `<fstream>`, `core/Fb2Parser.h`, `core/PdfParser.h`, `core/TxtParser.h`, `core/Unicode.h`.
 
 `constexpr size_t kMaxBookBytes = size_t(256) * 1024 * 1024;` is 268 435 456 bytes. It is the hard cap on how much of any book is ever read, and protects against zip bombs.
 
@@ -988,13 +988,15 @@ Every file this unit opens goes through `pathFromUtf8`, as a `std::ifstream` in 
   - `".zip"` → `Zip`
   - `".fb2"` → `Fb2`
   - `".txt"` → `Txt`
+  - `".pdf"` → `Pdf`
   - anything else → `Unknown`
 
   It works on full paths too, since only the suffix matters.
 - `isSupportedBookName(name)` is `formatFromName(name) != Unknown`. Any `.zip` counts as supported.
 - `fileNameOf(path)` returns everything after the last `'/'` or `'\\'`, or the whole input if there is none.
-- `fileStemOf(path)` takes `name = fileNameOf(path)` and makes 2 passes. In each pass, the first of `".zip"`, `".fb2"`, `".txt"` that `name` ends with (case-insensitively) is cut off, but only if `name` is longer than that extension; at most one extension is removed per pass. Examples:
+- `fileStemOf(path)` takes `name = fileNameOf(path)` and makes 2 passes. In each pass, the first of `".zip"`, `".fb2"`, `".txt"`, `".pdf"` that `name` ends with (case-insensitively) is cut off, but only if `name` is longer than that extension; at most one extension is removed per pass. Examples:
   - `Book.fb2.zip` → `Book`
+  - `Book.pdf` → `Book`
   - `a.zip.zip.zip` → `a.zip`
   - `.fb2` → `.fb2`
   - `Book.epub` → `Book.epub`
@@ -1059,19 +1061,21 @@ size_t zipRead(void* opaque, mz_uint64 ofs, void* buf, size_t n) {
 ### C.6 `bool readBookRaw(path, raw, contentFormat, err, maxBytes, zipped)`
 
 1. If `zipped` is non-null, set `*zipped = false`.
-2. Open the file and read up to 4 bytes into `char magic[4] = {}`. If the open fails: `"Cannot open the file."`, return false.
-3. If `magic` is `'P' 'K' 0x03 0x04`: set `*zipped = true` (if non-null) and return `readZipEntry(path, raw, fmt, err, maxBytes)`. Content decides, not the name, so a zip named `.fb2` or `.txt` is unpacked.
+2. Open the file and read its first bytes: `std::string head(1024, '\0')`, `read(head.data(), head.size())`, then `head.resize(gcount())`. If the open fails: `"Cannot open the file."`, return false.
+3. If `head.size() >= 4` and `head` starts with `'P' 'K' 0x03 0x04`: set `*zipped = true` (if non-null) and return `readZipEntry(path, raw, fmt, err, maxBytes)`. Content decides, not the name, so a zip named `.fb2` or `.txt` is unpacked.
 4. `byName = formatFromName(path)`. If it is `Zip`, `Fb2Zip` or `TxtZip`: `"The file is not a valid zip archive."`, return false.
-5. `readFile(path, raw, maxBytes, err)`; return false if it fails.
-6. `fmt` = `Fb2` if `byName == Fb2`, else `Txt` (this includes unknown extensions). A `Txt` result that `looksLikeFb2` becomes `Fb2`. Return true.
+5. If `looksLikePdf(head)` (`"%PDF-"` anywhere in the first 1024 bytes, spec 15): `contentFormat = Pdf` and return `readFile(path, raw, maxBytes, err)`. Content decides here too: a PDF named `.txt`, `.fb2` or without an extension is read as a PDF.
+6. If `byName == Pdf`: `"The file is not a valid PDF file."`, return false.
+7. `readFile(path, raw, maxBytes, err)`; return false if it fails.
+8. `fmt` = `Fb2` if `byName == Fb2`, else `Txt` (this includes unknown extensions). A `Txt` result that `looksLikeFb2` becomes `Fb2`. Return true.
 
-On success `contentFormat` is only ever `Fb2` or `Txt`.
+On success `contentFormat` is only ever `Fb2`, `Txt` or `Pdf` (never `Pdf` together with `*zipped`: a zip entry is always an `.fb2` or a `.txt`).
 
 ### C.7 `loadBook`, `loadBookMeta`, `loadBookText`
 
 **`loadBook(path, doc, err)`:**
 1. `readBookRaw(path, raw, fmt, err, kMaxBookBytes, &zipped)`. On failure, return false and leave `doc` untouched.
-2. `ok` = `parseFb2(raw, doc, err)` for `Fb2` (default options, so images are loaded), otherwise `parseTxt(raw, doc, fileStemOf(path), err)`. The stem comes from the outer file name, even for zips.
+2. `ok` = `parseFb2(raw, doc, err)` for `Fb2` (default options, so images are loaded), `parsePdf(raw, doc, fileStemOf(path), err)` for `Pdf` (default `PdfOptions`, so pictures are loaded), otherwise `parseTxt(raw, doc, fileStemOf(path), err)`. The stem comes from the outer file name, even for zips.
 3. If `ok && zipped`: `doc.meta.format += " (zip)"`, giving `"FB2 (zip)"` or `"TXT (zip)"`.
 4. If `ok` and `doc.meta.title` is empty: `doc.meta.title = fileStemOf(path)`.
 5. Return `ok`.
@@ -1082,14 +1086,19 @@ On success `contentFormat` is only ever `Fb2` or `Txt`.
 3. For `Fb2`:
    - if `raw.size() >= kHead` and `raw` has no `"</description>"`, read again with `maxBytes = size_t(16) * 1024 * 1024` (16 MiB), returning false if that read fails;
    - then call `parseFb2Meta(raw, meta)` and ignore its result.
-4. Otherwise (TXT): if `raw.size() > 64 * 1024`, truncate it to 65 536 bytes. Then `txtExtractText(raw, text, &meta, fileStemOf(path))` with a local `text` that is thrown away.
-5. If `zipped`: `meta.format += " (zip)"`.
-6. If `meta.title` is empty: `meta.title = fileStemOf(path)`.
-7. Return true, even when no metadata was found.
+4. For `Pdf` (tested first, before `Fb2`), where `raw` holds the first `kHead` bytes:
+   - open the file again (`std::ifstream`, binary); if that works: `seekg(0, end)`, `size = max(0, tellg())` as `uint64_t`, `n = min(size, 512 * 1024)`; only if `raw.size() < size`: `tail.assign(n, '\0')`, `seekg(size - n)`, `read(tail.data(), n)`, `tail.resize(gcount())`. If the open fails, `size` stays 0 and `tail` empty;
+   - `parsePdfMeta(raw, raw.size() >= size ? raw : tail, size, meta)` (the head doubles as the tail when it is the whole file);
+   - if that returns false: `readFile(path, full, kMaxBookBytes, err)` (return false if it fails) and `parsePdfMeta(full, full, full.size(), meta)`; if that is false too: `"The PDF file is damaged or protected with a password."`, return false;
+   - then `guessMetaFromFileStem(fileStemOf(path), meta)` (B.12: it fills only fields that are still empty).
+5. Otherwise (TXT): if `raw.size() > 64 * 1024`, truncate it to 65 536 bytes. Then `txtExtractText(raw, text, &meta, fileStemOf(path))` with a local `text` that is thrown away.
+6. If `zipped`: `meta.format += " (zip)"`.
+7. If `meta.title` is empty: `meta.title = fileStemOf(path)`.
+8. Return true, even when no metadata was found (a PDF returns false only as described in step 4).
 
 **`loadBookText(path, text, meta, err)`:**
 1. `readBookRaw(..., kMaxBookBytes, &zipped)`; return false if it fails.
-2. `fb2ExtractText(raw, text, meta)` for `Fb2`, otherwise `txtExtractText(raw, text, meta, fileStemOf(path))`.
+2. `fb2ExtractText(raw, text, meta)` for `Fb2`, `pdfExtractText(raw, text, meta, fileStemOf(path))` for `Pdf`, otherwise `txtExtractText(raw, text, meta, fileStemOf(path))`.
 3. If `meta` is non-null: append `" (zip)"` to the format when zipped, and set the title to `fileStemOf(path)` when it is empty.
 4. Return true.
 
@@ -1355,11 +1364,11 @@ Notation: `B(x)` means `parseFb2("<FictionBook><body>" + x + "</body></FictionBo
 
 60. `formatFromName` returns:
     - `Fb2Zip` for `a.FB2.ZIP`, `TxtZip` for `a.txt.zip`, `Zip` for `a.zip`;
-    - `Fb2` for `a.fb2`, `Txt` for `a.TXT`, `Txt` for `a.fb2.txt`;
+    - `Fb2` for `a.fb2`, `Txt` for `a.TXT`, `Txt` for `a.fb2.txt`, `Pdf` for `a.PDF`;
     - `Unknown` for `a.epub`.
 61. `fileNameOf` returns `a.fb2` for `C:\books\a.fb2`, `b.txt` for `dir/sub/b.txt`, and `plain` for `plain`.
 62. `fileStemOf` returns:
-    - `Book` for `/x/Book.fb2.zip` and for `Book.FB2`;
+    - `Book` for `/x/Book.fb2.zip`, for `Book.FB2` and for `Book.pdf`;
     - `a.zip` for `a.zip.zip.zip`;
     - `.fb2` for `.fb2`;
     - `Book.epub` for `Book.epub`.
@@ -1368,7 +1377,9 @@ Notation: `B(x)` means `parseFb2("<FictionBook><body>" + x + "</body></FictionBo
 65. `readBookRaw`:
     - a zip renamed `book.fb2` → unzipped, `*zipped == true`;
     - `book.zip` that is not a zip → false, `"The file is not a valid zip archive."`;
-    - a `.txt` (or unknown extension) whose first 4096 bytes contain `<FictionBook` → `Fb2`.
+    - a `.txt` (or unknown extension) whose first 4096 bytes contain `<FictionBook` → `Fb2`;
+    - a file of any name (except a zip name) with `%PDF-` in its first 1024 bytes → `Pdf`, read whole;
+    - `book.pdf` without `%PDF-` in its first 1024 bytes → false, `"The file is not a valid PDF file."`.
 66. Choosing the zip entry:
     - `a.txt` (10 B), `b.txt` (20 B), `c.fb2` → `c.fb2`;
     - only the two `.txt` entries → `b.txt`;
@@ -1379,7 +1390,7 @@ Notation: `B(x)` means `parseFb2("<FictionBook><body>" + x + "</body></FictionBo
     - a zipped FB2 → `meta.format == "FB2 (zip)"`; a zipped TXT → `"TXT (zip)"`;
     - for `___.txt`, the stem guess collapses to an empty title, so `loadBook` sets `title == "___"` from `fileStemOf`;
     - when reading fails, `doc` is left untouched.
-68. `loadBookMeta` returns true for an FB2 without title or author, with `title == fileStemOf(path)`. For a TXT it uses only the first 65 536 bytes.
+68. `loadBookMeta` returns true for an FB2 without title or author, with `title == fileStemOf(path)`. For a TXT it uses only the first 65 536 bytes. For a PDF it reads the first 256 KiB and the last 512 KiB, and the whole file only when `parsePdfMeta` needs it.
 69. `bookFingerprint`:
     - empty file → `14650fb0739d0383-0`;
     - file `a` → `44bd8ad473cd9906-1`;

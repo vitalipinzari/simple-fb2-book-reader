@@ -6,7 +6,7 @@ Reproduce every file below **byte for byte** at the path in its heading. The fen
 
 | File | Bytes | SHA-256 |
 |---|---:|---|
-| `tests/core_tests.cpp` | 38416 | `04c3bc957aee1a6f…` |
+| `tests/core_tests.cpp` | 65210 | `a6da6c5137e18772…` |
 
 ## `tests/core_tests.cpp`
 
@@ -32,8 +32,13 @@ UTF-8 without BOM, CRLF line endings, ends with a newline.
 #include "core/Fb2Parser.h"
 #include "core/FileUtil.h"
 #include "core/Hyphenator.h"
+#include "core/ImageCodec.h"
 #include "core/LibrarySearch.h"
 #include "core/LineBreaker.h"
+#include "core/PdfContent.h"
+#include "core/PdfCrypt.h"
+#include "core/PdfParser.h"
+#include "core/PdfReader.h"
 #include "core/TxtParser.h"
 #include "core/Unicode.h"
 #include "core/XmlReader.h"
@@ -848,6 +853,479 @@ static void testTextLayout(HyphenationService& hs) {
 }
 #endif
 
+// ---- PDF -------------------------------------------------------------------------------------------------------------
+
+static std::string toHex(std::string_view s) {
+  static const char* kDigits = "0123456789abcdef";
+  std::string out;
+  for (unsigned char c : s) {
+    out += kDigits[c >> 4];
+    out += kDigits[c & 15];
+  }
+  return out;
+}
+
+static std::string fromHex(std::string_view h) {
+  std::string out;
+  for (size_t k = 0; k + 1 < h.size(); k += 2)
+    out += static_cast<char>(std::stoi(std::string(h.substr(k, 2)), nullptr, 16));
+  return out;
+}
+
+static std::string deflateBytes(const std::string& data) {
+  mz_ulong n = mz_compressBound(static_cast<mz_ulong>(data.size()));
+  std::string out(n, '\0');
+  mz_compress(reinterpret_cast<unsigned char*>(out.data()), &n, reinterpret_cast<const unsigned char*>(data.data()),
+              static_cast<mz_ulong>(data.size()));
+  out.resize(n);
+  return out;
+}
+
+// A PDF made of numbered objects (1-based) with a classic cross-reference table.
+struct PdfBuilder {
+  std::vector<std::string> objs;
+  int add(const std::string& body) {
+    objs.push_back(body);
+    return static_cast<int>(objs.size());
+  }
+  static std::string stream(const std::string& dict, const std::string& data) {
+    return "<< " + dict + " /Length " + std::to_string(data.size()) + " >>\nstream\n" + data + "\nendstream";
+  }
+  std::string build(int root, const std::string& trailerExtra = "", int offsetError = 0) const {
+    std::string out = "%PDF-1.4\n%\xE2\xE3\xCF\xD3\n";
+    std::vector<size_t> offs;
+    for (size_t k = 0; k < objs.size(); ++k) {
+      offs.push_back(out.size());
+      out += std::to_string(k + 1) + " 0 obj\n" + objs[k] + "\nendobj\n";
+    }
+    const size_t xref = out.size();
+    out += "xref\n0 " + std::to_string(objs.size() + 1) + "\n0000000000 65535 f \n";
+    for (size_t o : offs) {
+      char b[32];
+      std::snprintf(b, sizeof(b), "%010zu 00000 n \n", o + static_cast<size_t>(offsetError));
+      out += b;
+    }
+    out += "trailer\n<< /Size " + std::to_string(objs.size() + 1) + " /Root " + std::to_string(root) + " 0 R " +
+           trailerExtra + " >>\nstartxref\n" + std::to_string(xref) + "\n%%EOF\n";
+    return out;
+  }
+};
+
+// A font whose glyphs are all half an em wide, so that lines of 50 characters are full lines.
+static std::string testFont(const char* name) {
+  std::string w;
+  for (int c = 32; c <= 126; ++c) w += "500 ";
+  return std::string("<< /Type /Font /Subtype /Type1 /BaseFont /") + name +
+         " /FirstChar 32 /LastChar 126 /Widths [" + w + "] /Encoding /WinAnsiEncoding >>";
+}
+
+// A two-page book: running heads with page numbers, a chapter title, a hyphenated line end, a paragraph that goes on
+// over the page break, a compound word broken at its hyphen, a list and an outline.
+static std::string pdfTestBook(int offsetError = 0) {
+  PdfBuilder b;
+  const int catalog = b.add("<< /Type /Catalog /Pages 2 0 R /Outlines 9 0 R >>");
+  b.add("<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 /MediaBox [0 0 300 400] /Resources << /Font << /F1 5 0 R >> >> >>");
+  b.add("<< /Type /Page /Parent 2 0 R /Contents 6 0 R >>");
+  b.add("<< /Type /Page /Parent 2 0 R /Contents 7 0 R >>");
+  b.add(testFont("TestSerif"));
+  auto page = [](const char* n, const std::string& body) {
+    return std::string("BT /F1 8 Tf 20 385 Td (TEST BOOK) Tj ET BT /F1 8 Tf 262 385 Td (") + n + ") Tj ET\n" + body;
+  };
+  b.add(PdfBuilder::stream("", page("1",
+      "BT /F1 16 Tf 20 350 Td (Chapter One) Tj ET\n"
+      "BT /F1 10 Tf 13 TL 20 320 Td (The first paragraph of this book has many words to) Tj T*\n"
+      "(fill several lines, and this one ends with a popu-) Tj T* (lation broken by hyphenation.) Tj ET\n"
+      "BT /F1 10 Tf 13 TL 20 268 Td (A second paragraph begins here, and its final line) Tj T*\n"
+      "[(on the first page is full, and so the text )-0(runs on)] TJ T*\n"
+      "(to the next page; the next line carries on with no) Tj ET\n")));
+  b.add(PdfBuilder::stream("", page("2",
+      "BT /F1 10 Tf 13 TL 20 350 Td (break. A compound word broken at its hyphen: self-) Tj T*\n"
+      "(made keeps the hyphen in the joined text of lines.) Tj T* (That is all.) Tj ET\n"
+      "BT /F1 10 Tf 13 TL 20 300 Td (\\225 first item) Tj T* (\\225 second item) Tj ET\n")));
+  b.add("<< /Title <feff" + toHex(std::string("\0T\0e\0s\0t\0 \0B\0o\0o\0k", 18)) + "> /Author (Jane Doe) >>");
+  b.add("<< /Type /Outlines /First 10 0 R /Last 10 0 R /Count 2 >>");
+  b.add("<< /Title (Chapter One) /Parent 9 0 R /First 11 0 R /Last 11 0 R /Dest [3 0 R /XYZ 0 400 null] >>");
+  b.add("<< /Title (Page two) /Parent 10 0 R /Dest [4 0 R /XYZ 0 400 null] >>");
+  return b.build(catalog, "/Info 8 0 R", offsetError);
+}
+
+static void checkTestBook(const Document& doc) {
+  CHECK_EQ(doc.meta.format, std::string("PDF"));
+  CHECK_EQ(doc.meta.title, std::string("Test Book"));
+  CHECK(doc.meta.authors.size() == 1 && doc.meta.authors[0] == "Jane Doe");
+  CHECK_EQ(doc.blocks.size(), size_t(5));
+  if (doc.blocks.size() < 5) return;
+  CHECK(doc.blocks[0].type == BlockType::Title && doc.blocks[0].level == 1);
+  CHECK_EQ(doc.blocks[0].text, std::string("Chapter One"));
+  CHECK_EQ(doc.blocks[1].text, std::string("The first paragraph of this book has many words to fill several lines, "
+                                           "and this one ends with a population broken by hyphenation."));
+  CHECK_EQ(doc.blocks[2].text,
+           std::string("A second paragraph begins here, and its final line on the first page is full, and so the text "
+                       "runs on to the next page; the next line carries on with no break. A compound word broken at "
+                       "its hyphen: self-made keeps the hyphen in the joined text of lines. That is all."));
+  CHECK_EQ(doc.blocks[3].text, std::string("\xE2\x80\xA2 first item"));
+  CHECK_EQ(doc.blocks[4].text, std::string("\xE2\x80\xA2 second item"));
+  CHECK_EQ(doc.toc.size(), size_t(2));
+  if (doc.toc.size() == 2) {
+    CHECK(doc.toc[0].title == "Chapter One" && doc.toc[0].block == 0 && doc.toc[0].level == 1);
+    CHECK(doc.toc[1].title == "Page two" && doc.toc[1].level == 2);
+  }
+}
+
+// Cross-reference stream (PNG "Up" predictor), an object stream, compressed content and a composite font
+// (Identity-H) whose ToUnicode map uses bfrange and bfchar. With indirectXrefLength the cross-reference stream's
+// /Length is a reference (to object 10).
+static std::string pdfCompressed(bool indirectXrefLength = false) {
+  const std::string o4 = "<< /Type /Font /Subtype /Type0 /BaseFont /CidTest /Encoding /Identity-H "
+                         "/DescendantFonts [5 0 R] /ToUnicode 6 0 R >>";
+  const std::string o5 = "<< /Type /Font /Subtype /CIDFontType2 /BaseFont /CidTest /DW 1000 /W [1 [500 500 500] 4 4 250] >>";
+  const std::string cmap =
+      "/CIDInit /ProcSet findresource begin 12 dict begin begincmap 1 begincodespacerange <0000> <FFFF> "
+      "endcodespacerange 1 beginbfrange <0001> <0003> <0041> endbfrange 1 beginbfchar <0004> <0020> endbfchar "
+      "endcmap end end";
+  const std::string content = deflateBytes("BT /F1 12 Tf 30 250 Td <000100020003000400010002> Tj ET");
+  const std::string hdr = "4 0 5 " + std::to_string(o4.size() + 1) + " ";
+  const std::string objStm = deflateBytes(hdr + o4 + " " + o5);
+  std::string out = "%PDF-1.5\n";
+  std::vector<size_t> off(10, 0);
+  auto put = [&](int n, const std::string& body) {
+    off[static_cast<size_t>(n)] = out.size();
+    out += std::to_string(n) + " 0 obj\n" + body + "\nendobj\n";
+  };
+  put(1, "<< /Type /Catalog /Pages 2 0 R >>");
+  put(2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+  put(3, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Resources << /Font << /F1 4 0 R >> >> /Contents 7 0 R >>");
+  put(6, PdfBuilder::stream("", cmap));
+  put(7, PdfBuilder::stream("/Filter /FlateDecode", content));
+  put(8, PdfBuilder::stream("/Type /ObjStm /N 2 /First " + std::to_string(hdr.size()) + " /Filter /FlateDecode", objStm));
+  // Object 10: the length of the cross-reference stream, ten digits filled in when it is known.
+  size_t lengthAt = 0;
+  if (indirectXrefLength) {
+    off.resize(11, 0);
+    off[10] = out.size();
+    out += "10 0 obj\n";
+    lengthAt = out.size();
+    out += "0000000000\nendobj\n";
+  }
+  // Cross-reference stream: type (1 byte), offset or object stream (4 bytes), generation or index (2 bytes).
+  const size_t xrefOff = out.size();
+  std::string rows, prev(7, '\0');
+  auto row = [&](int type, uint32_t f1, uint16_t f2) {
+    std::string r(7, '\0');
+    r[0] = static_cast<char>(type);
+    for (int k = 0; k < 4; ++k) r[1 + static_cast<size_t>(k)] = static_cast<char>((f1 >> (24 - 8 * k)) & 0xFF);
+    r[5] = static_cast<char>(f2 >> 8);
+    r[6] = static_cast<char>(f2 & 0xFF);
+    rows += '\x02';  // PNG "Up"
+    for (size_t k = 0; k < 7; ++k)
+      rows += static_cast<char>(static_cast<unsigned char>(r[k]) - static_cast<unsigned char>(prev[k]));
+    prev = r;
+  };
+  row(0, 0, 0xFFFF);
+  for (int n = 1; n <= 3; ++n) row(1, static_cast<uint32_t>(off[static_cast<size_t>(n)]), 0);
+  row(2, 8, 0);
+  row(2, 8, 1);
+  for (int n = 6; n <= 8; ++n) row(1, static_cast<uint32_t>(off[static_cast<size_t>(n)]), 0);
+  row(1, static_cast<uint32_t>(xrefOff), 0);
+  if (indirectXrefLength) row(1, static_cast<uint32_t>(off[10]), 0);
+  const std::string xrefData = deflateBytes(rows);
+  const std::string xrefDict = std::string("/Type /XRef /Size ") + (indirectXrefLength ? "11" : "10") +
+                               " /W [1 4 2] /Root 1 0 R /Filter /FlateDecode /DecodeParms << /Predictor 12 /Columns 7 >>";
+  if (indirectXrefLength) {
+    char digits[16];
+    std::snprintf(digits, sizeof(digits), "%010zu", xrefData.size());
+    out.replace(lengthAt, 10, digits);
+    out += "9 0 obj\n<< " + xrefDict + " /Length 10 0 R >>\nstream\n" + xrefData + "\nendstream\nendobj\n";
+  } else {
+    put(9, PdfBuilder::stream(xrefDict, xrefData));
+  }
+  out += "startxref\n" + std::to_string(xrefOff) + "\n%%EOF\n";
+  return out;
+}
+
+// One page with a picture (2x2 RGB, compressed) above a line of text.
+static std::string pdfWithImage() {
+  PdfBuilder b;
+  const int catalog = b.add("<< /Type /Catalog /Pages 2 0 R >>");
+  b.add("<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+  b.add("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Resources << /Font << /F1 5 0 R >> "
+        "/XObject << /Im1 6 0 R >> >> /Contents 4 0 R >>");
+  b.add(PdfBuilder::stream("", "q 200 0 0 150 50 120 cm /Im1 Do Q BT /F1 10 Tf 20 60 Td (A picture above.) Tj ET"));
+  b.add(testFont("TestSerif"));
+  const std::string px("\xFF\x00\x00\x00\xFF\x00\x00\x00\xFF\xFF\xFF\xFF", 12);  // red green / blue white
+  b.add(PdfBuilder::stream("/Type /XObject /Subtype /Image /Width 2 /Height 2 /ColorSpace /DeviceRGB "
+                           "/BitsPerComponent 8 /Filter /FlateDecode",
+                           deflateBytes(px)));
+  return b.build(catalog);
+}
+
+// A page encrypted by the standard security handler with an empty user password.
+// kind: 0 = RC4 40-bit (revision 2), 1 = AES-128 (revision 4), 2 = AES-256 (revision 5). With identityContent the
+// page's content stream is stored unencrypted, marked with the Identity crypt filter.
+static std::string pdfEncrypted(int kind, bool identityContent = false) {
+  const std::string pad = fromHex("28bf4e5e4e758a4164004e56fffa01082e2e00b6d0683e802f0ca9fe6453697a");
+  const std::string id0 = fromHex("0123456789abcdef0123456789abcdef");
+  const std::string pbytes = fromHex("fcffffff");  // P = -4, little-endian
+  std::string key, encDict;
+  auto xorKey = [](std::string k, int v) {
+    for (char& c : k) c = static_cast<char>(static_cast<unsigned char>(c) ^ v);
+    return k;
+  };
+  if (kind == 0 || kind == 1) {
+    const size_t n = kind == 0 ? 5 : 16;
+    // Algorithm 3 (owner password "owner"): O encrypts the (empty) user password.
+    std::string h = pdf::md5("owner" + pad.substr(0, 27));
+    if (kind == 1) {
+      for (int k = 0; k < 50; ++k) h = pdf::md5(h.substr(0, n));
+    }
+    std::string o = pdf::rc4(h.substr(0, n), pad);
+    if (kind == 1) {
+      for (int k = 1; k <= 19; ++k) o = pdf::rc4(xorKey(h.substr(0, n), k), o);
+    }
+    // Algorithm 2: the file key; then U (algorithm 4 or 5).
+    std::string fh = pdf::md5(pad + o + pbytes + id0);
+    if (kind == 1) {
+      for (int k = 0; k < 50; ++k) fh = pdf::md5(fh.substr(0, n));
+    }
+    key = fh.substr(0, n);
+    std::string u;
+    if (kind == 0) {
+      u = pdf::rc4(key, pad);
+    } else {
+      u = pdf::rc4(key, pdf::md5(pad + id0));
+      for (int k = 1; k <= 19; ++k) u = pdf::rc4(xorKey(key, k), u);
+      u += std::string(16, '\0');
+    }
+    encDict = kind == 0 ? "<< /Filter /Standard /V 1 /R 2 /O <" + toHex(o) + "> /U <" + toHex(u) + "> /P -4 >>"
+                        : "<< /Filter /Standard /V 4 /R 4 /Length 128 /CF << /StdCF << /CFM /AESV2 /Length 16 >> >> "
+                          "/StmF /StdCF /StrF /StdCF /O <" +
+                              toHex(o) + "> /U <" + toHex(u) + "> /P -4 >>";
+  } else {
+    key = fromHex("00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff");
+    const std::string vsalt = "vsalt123", ksalt = "ksalt456";
+    const std::string u = pdf::sha256(vsalt) + vsalt + ksalt;
+    const std::string ue = pdf::aesCbcEncrypt(pdf::sha256(ksalt), std::string(16, '\0'), key);
+    encDict = "<< /Filter /Standard /V 5 /R 5 /Length 256 /CF << /StdCF << /CFM /AESV3 /Length 32 >> >> /StmF /StdCF "
+              "/StrF /StdCF /O <" + toHex(std::string(48, '\x11')) + "> /U <" + toHex(u) + "> /OE <" +
+              toHex(std::string(32, '\x22')) + "> /UE <" + toHex(ue) + "> /P -4 >>";
+  }
+  auto aes = [](const std::string& k, const std::string& iv, std::string data) {
+    const size_t padN = 16 - data.size() % 16;
+    data.append(padN, static_cast<char>(padN));
+    return iv + pdf::aesCbcEncrypt(k, iv, data);
+  };
+  auto encrypt = [&](const std::string& data, int num) {
+    if (kind == 2) return aes(key, "0123456789ABCDEF", data);
+    std::string k = key;
+    k += static_cast<char>(num & 0xFF);
+    k += std::string("\0\0\0\0", 4);  // the rest of the 3-byte object number and the 2-byte generation (all zero)
+    if (kind == 1) k += "sAlT";
+    const std::string objKey = pdf::md5(k).substr(0, std::min<size_t>(key.size() + 5, 16));
+    return kind == 0 ? pdf::rc4(objKey, data) : aes(objKey, "FEDCBA9876543210", data);
+  };
+  PdfBuilder b;
+  const int catalog = b.add("<< /Type /Catalog /Pages 2 0 R >>");
+  b.add("<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 400] /Resources << /Font << /F1 5 0 R >> >> >>");
+  b.add("<< /Type /Page /Parent 2 0 R /Contents 4 0 R >>");
+  const std::string content = "BT /F1 16 Tf 20 350 Td (Secret Chapter) Tj ET "
+                              "BT /F1 10 Tf 20 320 Td (Only readers with the key can see this line.) Tj ET";
+  if (identityContent) {
+    b.add(PdfBuilder::stream("/Filter [/Crypt] /DecodeParms [<< /Name /Identity >>]", content));
+  } else {
+    b.add(PdfBuilder::stream("", encrypt(content, 4)));
+  }
+  b.add(testFont("TestSerif"));
+  b.add("<< /Title <" + toHex(encrypt("Locked Book", 6)) + "> >>");
+  b.add(encDict);
+  return b.build(catalog, "/Info 6 0 R /Encrypt 7 0 R /ID [<" + toHex(id0) + "> <" + toHex(id0) + ">]");
+}
+
+// Content that breaks the rules: a form with an unclosed artifact and more Q than q, and a ToUnicode map with a bfrange
+// onto an array (more entries after it in the same block) and a range that ends at <FFFFFFFF>.
+static std::string pdfDamagedContent() {
+  PdfBuilder b;
+  const int catalog = b.add("<< /Type /Catalog /Pages 2 0 R >>");
+  b.add("<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+  b.add("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Resources << /Font << /F1 5 0 R /F2 8 0 R >> "
+        "/XObject << /Fm1 7 0 R >> >> /Contents 4 0 R >>");
+  b.add(PdfBuilder::stream("", "q /Fm1 Do Q BT /F1 12 Tf 30 250 Td <000100020003000400050006> Tj ET "
+                               "BT /F2 12 Tf 30 200 Td (after the form) Tj ET"));
+  b.add("<< /Type /Font /Subtype /Type0 /BaseFont /CidTest /Encoding /Identity-H /DescendantFonts [<< /Type /Font "
+        "/Subtype /CIDFontType2 /BaseFont /CidTest /DW 500 >>] /ToUnicode 6 0 R >>");
+  b.add(PdfBuilder::stream("", "begincmap 1 begincodespacerange <0000> <FFFF> endcodespacerange 3 beginbfrange "
+                               "<0001> <0003> [<0041> <0042> <0043>] <0004> <0004> <0020> <0005> <0006> <0058> "
+                               "endbfrange 1 beginbfrange <FFFFFF00> <FFFFFFFF> <0041> endbfrange endcmap"));
+  b.add(PdfBuilder::stream("/Type /XObject /Subtype /Form /BBox [0 0 300 300]", "/Artifact BMC q Q Q Q"));
+  b.add(testFont("TestSans"));
+  return b.build(catalog);
+}
+
+// Two tables of evenly spaced lines, a page each: one with a row per line (values in lower case), one whose single row
+// goes on over two lines.
+static std::string pdfTable() {
+  PdfBuilder b;
+  const int catalog = b.add("<< /Type /Catalog /Pages 2 0 R >>");
+  b.add("<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 /MediaBox [0 0 300 300] /Resources << /Font << /F1 7 0 R >> >> >>");
+  b.add("<< /Type /Page /Parent 2 0 R /Contents 5 0 R >>");
+  b.add("<< /Type /Page /Parent 2 0 R /Contents 6 0 R >>");
+  b.add(PdfBuilder::stream("", "BT /F1 10 Tf 30 250 Td (Name) Tj 120 0 Td (Value) Tj ET "
+                               "BT /F1 10 Tf 30 236 Td (alpha) Tj 120 0 Td (red) Tj ET "
+                               "BT /F1 10 Tf 30 222 Td (beta) Tj 120 0 Td (dark green) Tj ET"));
+  b.add(PdfBuilder::stream("", "BT /F1 10 Tf 30 250 Td (Customer) Tj 120 0 Td (Rider request and pickup) Tj ET "
+                               "BT /F1 10 Tf 30 236 Td (Journey) Tj 120 0 Td (continue the trust.) Tj ET"));
+  b.add(testFont("TestSans"));
+  return b.build(catalog);
+}
+
+static void testPdf() {
+  // Hashes and ciphers (RFC 1321, FIPS 180-4 and FIPS 197 vectors; the long messages checked with Python's hashlib).
+  CHECK_EQ(toHex(pdf::md5("abc")), std::string("900150983cd24fb0d6963f7d28e17f72"));
+  CHECK_EQ(toHex(pdf::md5(std::string(1000, 'a'))), std::string("cabe45dcc9ae5b66ba86600cca6b8ba8"));
+  CHECK_EQ(toHex(pdf::sha256("abc")), std::string("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"));
+  CHECK_EQ(toHex(pdf::sha256(std::string(1000, 'a'))),
+           std::string("41edece42d63e8d9bf515a9ba6932e1c20cbc9f5a5d134645adb5db1b9737ea3"));
+  CHECK_EQ(toHex(pdf::sha384("abc")), std::string("cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed"
+                                                  "8086072ba1e7cc2358baeca134c825a7"));
+  CHECK_EQ(toHex(pdf::sha512(std::string(1000, 'a'))),
+           std::string("67ba5535a46e3f86dbfbed8cbbaf0125c76ed549ff8b0b9e03e0c88cf90fa634fa7b12b47d77b694de488ace8d9a6596"
+                       "7dc96df599727d3292a8d9d447709c97"));
+  CHECK_EQ(toHex(pdf::rc4("Key", "Plaintext")), std::string("bbf316e8d940af0ad3"));
+  const std::string block = fromHex("00112233445566778899aabbccddeeff"), zero(16, '\0');
+  CHECK_EQ(toHex(pdf::aesCbcEncrypt(fromHex("000102030405060708090a0b0c0d0e0f"), zero, block)),
+           std::string("69c4e0d86a7b0430d8cdb78070b4c55a"));
+  const std::string k256 = fromHex("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
+  CHECK_EQ(toHex(pdf::aesCbcEncrypt(k256, zero, block)), std::string("8ea2b7ca516745bfeafc49904b496089"));
+  CHECK_EQ(pdf::aesCbcDecrypt(k256, zero, fromHex("8ea2b7ca516745bfeafc49904b496089")), block);
+
+  // Lexer.
+  {
+    pdf::Lexer lx("<< /Na#20me (a\\(b\\)c\\101\\\n) /Hex <48 65 6C6> /Arr [-.5 4. --3 7 0 R (x)] /K true /N null >>");
+    pdf::Object o;
+    CHECK(lx.object(o) && o.isDict());
+    CHECK_EQ(o["Na me"].s, std::string("a(b)cA"));
+    CHECK_EQ(o["Hex"].s, std::string("Hel`"));
+    const pdf::Object& arr = o["Arr"];
+    CHECK(arr.size() == 5 && arr.at(0).num() == -0.5 && arr.at(1).num() == 4.0 && arr.at(2).integer() == -3);
+    CHECK(arr.at(3).isRef() && arr.at(3).i == 7 && arr.at(4).s == "x");
+    CHECK(o["K"].type == pdf::ObjType::Bool && o["K"].flag && o["N"].isNull());
+  }
+  // Filters.
+  {
+    std::string out;
+    pdf::FilterParams p;
+    CHECK(pdf::applyFilter("FlateDecode", p, deflateBytes("Hello, PDF!"), out, 1 << 20) && out == "Hello, PDF!");
+    std::string big(100000, 'x');
+    for (size_t k = 0; k < big.size(); k += 7) big[k] = static_cast<char>('a' + k % 26);
+    CHECK(pdf::applyFilter("Fl", p, deflateBytes(big), out, 1 << 20) && out == big);  // output over many windows
+    CHECK(pdf::applyFilter("ASCIIHexDecode", p, "48 65 6c 6C6F7>", out, 100) && out == "Hellop");
+    CHECK(pdf::applyFilter("ASCII85Decode", p, "<~9jqo^~>", out, 100) && out == "Man ");
+    CHECK(pdf::applyFilter("RunLengthDecode", p, std::string("\x02" "abc" "\xFE" "z" "\x80", 7), out, 100) &&
+          out == "abczzz");
+    // LZW: the example in PDF 32000-1, 7.4.4.2.
+    CHECK(pdf::applyFilter("LZWDecode", p, fromHex("800b6050220c0c8501"), out, 100) && out == "-----A---B");
+    pdf::FilterParams png;
+    png.predictor = 12;
+    png.columns = 3;
+    const std::string rows = std::string("\x00" "abc", 4) + std::string("\x02\x01\x01\x01", 4);  // None, then Up
+    CHECK(pdf::applyFilter("FlateDecode", png, deflateBytes(rows), out, 100) && out == "abcbcd");
+    // A predictor row longer than the whole stream (damaged parameters) never makes the output larger than the input.
+    pdf::FilterParams wide = png;
+    wide.columns = 1 << 24;
+    CHECK(pdf::applyFilter("FlateDecode", wide, deflateBytes(rows), out, 1 << 30) && out.size() <= rows.size());
+    CHECK(!pdf::applyFilter("DCTDecode", p, "x", out, 100));
+  }
+  // Text strings and glyph names.
+  CHECK_EQ(pdf::textToUtf8("\x93" "fi" "\x94" "ne"), std::string("\xEF\xAC\x81" "fi\xEF\xAC\x82" "ne"));
+  CHECK_EQ(pdf::textToUtf8(std::string("\xFE\xFF\x04\x1F\x04\x40\x00\x20\x00\x21", 10)),
+           std::string("\xD0\x9F\xD1\x80 !"));
+  CHECK_EQ(pdf::glyphNameToUtf8("afii10017"), std::string("\xD0\x90"));
+  CHECK_EQ(pdf::glyphNameToUtf8("f_f_i"), std::string("ffi"));
+  CHECK_EQ(pdf::glyphNameToUtf8("uni0416.sc"), std::string("\xD0\x96"));
+  CHECK_EQ(pdf::glyphNameToUtf8("g123"), std::string());
+
+  // A book.
+  Document doc;
+  std::string err;
+  const std::string book = pdfTestBook();
+  CHECK(looksLikePdf(book));
+  CHECK(parsePdf(book, doc, "stem", &err));
+  checkTestBook(doc);
+  // The same book with every cross-reference offset wrong: the objects are found by scanning.
+  Document repaired;
+  CHECK(parsePdf(pdfTestBook(3), repaired, "stem", &err));
+  checkTestBook(repaired);
+  // Metadata from the first and the last bytes only.
+  BookMeta meta;
+  CHECK(parsePdfMeta(std::string_view(book).substr(0, 64), std::string_view(book).substr(book.size() / 3),
+                     book.size(), meta) &&
+        meta.title == "Test Book");
+  // Text for full-text search.
+  std::string text;
+  pdfExtractText(book, text, &meta, "stem");
+  CHECK(text.find("a population broken") != std::string::npos && meta.authorsJoined() == "Jane Doe");
+
+  // Cross-reference stream, object stream, composite font; title and author from the file name.
+  Document c;
+  CHECK(parsePdf(pdfCompressed(), c, "Author - Compressed Title", &err));
+  CHECK(c.blocks.size() == 1 && c.blocks[0].text == "ABC AB");
+  CHECK(c.meta.title == "Compressed Title" && c.meta.authorsJoined() == "Author");
+  // The same with an indirect /Length in the cross-reference stream: read without a repair. A File opens a second
+  // file as if it were new.
+  {
+    const std::string indirect = pdfCompressed(true);
+    pdf::File f;
+    CHECK(f.open(indirect, &err) && !f.repaired() && f.version() == "1.5");
+    CHECK(f.open(book, &err) && !f.repaired() && f.version() == "1.4");
+    Document ci;
+    CHECK(parsePdf(indirect, ci, "stem", &err) && ci.blocks.size() == 1 && ci.blocks[0].text == "ABC AB");
+  }
+
+  // A picture: stored still compressed, decoded when shown.
+  Document im;
+  CHECK(parsePdf(pdfWithImage(), im, "stem", &err));
+  CHECK(im.blocks.size() == 2 && im.blocks[0].type == BlockType::Image && im.blocks[1].text == "A picture above.");
+  CHECK_EQ(im.images.size(), size_t(1));
+  if (!im.images.empty()) {
+    const ImageData& id = im.images[0];
+    CHECK(id.width == 2 && id.height == 2);
+    std::vector<unsigned char> rgba;
+    int w = 0, h = 0;
+    CHECK(decodeImageRgba(id.bytes.data(), id.bytes.size(), rgba, w, h) && w == 2 && h == 2);
+    CHECK(rgba.size() == 16 && rgba[0] == 255 && rgba[1] == 0 && rgba[5] == 255 && rgba[10] == 255 && rgba[12] == 255);
+  }
+
+  // Encrypted files that open without a password.
+  int opened = 0;
+  for (int kind = 0; kind < 3; ++kind) {
+    Document e;
+    const bool ok = parsePdf(pdfEncrypted(kind), e, "stem", &err);
+    CHECK(ok);
+    CHECK(e.blocks.size() == 2 && e.blocks[0].text == "Secret Chapter" &&
+          e.blocks[1].text == "Only readers with the key can see this line.");
+    CHECK_EQ(e.meta.title, std::string("Locked Book"));
+    opened += ok ? 1 : 0;
+  }
+  // A stream an encrypted file keeps in the clear (the Identity crypt filter).
+  Document clear;
+  CHECK(parsePdf(pdfEncrypted(1, true), clear, "stem", &err) && clear.blocks.size() == 2 &&
+        clear.blocks[0].text == "Secret Chapter");
+  // Content that breaks the rules does not break the page.
+  Document dc;
+  CHECK(parsePdf(pdfDamagedContent(), dc, "stem", &err));
+  CHECK(dc.blocks.size() == 2 && dc.blocks[0].text == "ABC XY" && dc.blocks[1].text == "after the form");
+  // Tables of evenly spaced lines: a row per line, and a row whose cells go on over two lines.
+  Document tb;
+  CHECK(parsePdf(pdfTable(), tb, "stem", &err));
+  CHECK(tb.blocks.size() == 4 && tb.blocks[0].type == BlockType::TableRow && tb.blocks[0].text == "Name | Value" &&
+        tb.blocks[1].text == "alpha | red" && tb.blocks[2].text == "beta | dark green" &&
+        tb.blocks[3].text == "Customer Journey | Rider request and pickup continue the trust.");
+  // Not a PDF that can be read.
+  Document bad;
+  CHECK(!parsePdf("%PDF-1.4\ngarbage", bad, "stem", &err) && !err.empty());
+  std::printf("  pdf: %zu blocks, %zu contents entries, repaired %zu blocks, encrypted files opened %d of 3\n",
+              doc.blocks.size(), doc.toc.size(), repaired.blocks.size(), opened);
+}
+
 int main(int argc, char** argv) {
   if (argc > 1) g_assets = argv[1];
   HyphenationService hs;
@@ -862,6 +1340,8 @@ int main(int argc, char** argv) {
   std::printf("txt\n");
   testTxt();
   testTxtTypography();
+  std::printf("pdf\n");
+  testPdf();
   std::printf("hyphenation\n");
   testHyphenation(hs);
   std::printf("line breaking\n");

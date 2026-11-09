@@ -7,8 +7,9 @@ plain text and an explicit web link, a table, a citation, two footnotes in a not
 quotes, ё, and long words for hyphenation. It has 50 blocks and 5 639 characters; at 1280 × 820 with the default
 settings it has 8 pages.
 
-`screenshots/` holds what **the original Lanternleaf 0.6.0** (Windows build, NVIDIA OpenGL 4.1 driver) rendered
-for that book in screenshot mode. A correct copy renders the same pictures: the same line breaks, hyphens, page
+`screenshots/` holds what **the original Lanternleaf 0.7.0** (Windows build, NVIDIA OpenGL 4.1 driver) rendered
+for that book in screenshot mode (0.6.0 rendered the same images except the Help panel, whose version line and
+format list changed). A correct copy renders the same pictures: the same line breaks, hyphens, page
 breaks, positions, colours, panel layouts and texts. Tiny anti-aliasing differences between GPUs are fine;
 anything a reader would notice is not.
 
@@ -40,6 +41,10 @@ Each image was made with a fresh, empty settings folder (`--settings-dir <new te
 PowerShell note: pass a phrase as one argument with the call operator (`& $exe … --find 'lamp oil'`).
 `Start-Process -ArgumentList` joins array items with spaces without quoting, so `lamp oil` would arrive as two
 arguments.
+
+`09-settings-panel.png`: the panel ends with the path of the settings folder, below the visible part. A temp
+folder path of a very different length wraps differently and changes the length of the scrollbar's thumb;
+that alone is not a difference to fix.
 
 The About panel is not among the references because its copyright line differs on purpose in the MIT edition
 (see `ai/PROMPT.md` § 7).

@@ -13,7 +13,17 @@ assets folder (default `assets`). CTest runs it as `ll_tests <repo>/assets` (`./
 directly: `build\vs2026\Release\ll_tests.exe <repo>\assets`.
 
 Groups: unicode, encodings (cp1251, KOI8-R, CP866, UTF-16, cp1252), xml (the tolerant reader), fb2 (structure,
-styles, footnotes, cover, broken markup), txt (paragraph heuristics, typography, Gutenberg), hyphenation, line
+styles, footnotes, cover, broken markup), txt (paragraph heuristics, typography, Gutenberg), pdf (the standard
+test vectors of MD5, SHA-256/384/512, RC4 and AES; the lexer; the Flate, LZW, ASCIIHex, ASCII85 and RunLength
+filters and PNG predictors; text strings and glyph names; a generated two-page book with its title, author,
+paragraphs, joined hyphenated words, list, outline and contents; the same book with broken cross-reference
+offsets; metadata from the head and tail of a file; text extraction; a cross-reference stream with an object
+stream and an Identity-H font with a ToUnicode map; a picture through the PDF picture container; RC4, AES-128 and
+AES-256 encrypted files; a stream that an encrypted file keeps in the clear; the same compressed file with an
+indirect /Length on its cross-reference stream, read without a repair; damaged content (a form with an unclosed
+artifact and more Q than q, a ToUnicode bfrange onto an array and one that ends at <FFFFFFFF>, a predictor row
+longer than its stream); tables of evenly spaced lines (a row per line with values in lower case, and a row whose
+cells go on over two lines); garbage that must fail), hyphenation, line
 breaking, matching (transliteration, query terms), web addresses (trailing punctuation and brackets, Cyrillic
 paths, existing links left alone, styles kept around new links), library search (on a temporary folder tree,
 including a zip and a cp1251 file in a Cyrillic folder), and — with `LL_TESTS_WITH_TEXT` — text layout (no
@@ -28,6 +38,8 @@ encodings
 xml
 fb2
 txt
+pdf
+  pdf: 5 blocks, 2 contents entries, repaired 5 blocks, encrypted files opened 3 of 3
 hyphenation
   hyphenation: hy-phen-ation com-puter Ta-ble пе-ре-но-сы про-грам-ми-ро-ва-ние До-сто-ев-ский несчаст-ли-вая
 line breaking
@@ -40,10 +52,12 @@ text layout
   pages=20 back-consistent=19
   subtitle pages=13, ending in a heading=0
   narrow URL: 7 lines, 3 end after a slash, 0 hyphens
-751 checks, 0 failures
+840 checks, 0 failures
 ```
 
-The indented lines are measurements, not checks: they come out of the hyphenator, the shaper (kerning of "AV"),
+The indented lines are measurements, not checks: the `pdf` line counts the blocks and contents entries of the
+generated PDF book, the blocks of its copy with broken cross-reference offsets and the encrypted test files that
+opened (spec 15); the others come out of the hyphenator, the shaper (kerning of "AV"),
 the line breaker (how many paragraphs the optimal algorithm solved, failed, and how many needed the greedy
 fallback), the paginator and the URL breaker, all on the bundled fonts. Identical numbers are the strongest
 evidence that hyphenation, shaping, line breaking and pagination behave exactly like the original; any difference
@@ -71,7 +85,10 @@ looking at both: line breaks and hyphens, page starts, title/epigraph/poem/citat
 spine and shadows, the curl geometry, toolbar buttons and their order, what moved into Menu at 700 px, status bar
 texts, panel placement, every label in the Settings, Contents, Help and Library panels. Fix every visible
 difference. (A pixel diff is a useful extra on the same GPU vendor; anti-aliasing may differ slightly between
-drivers.)
+drivers.) The images are those of the original 0.7.0; it renders 01–10 and 12–15 exactly like 0.6.0 did.
+`09-settings-panel.png` has one trap: the Settings panel ends with the path of the settings folder, below the
+visible part, so the length of your temp folder's path changes how that text wraps and with it the length of
+the scrollbar's thumb. A difference in the thumb alone is not a fault.
 
 The README screenshots in `docs/` are made the same way (spec 14).
 
@@ -90,11 +107,17 @@ The README screenshots in `docs/` are made the same way (spec 14).
 Use test books made in a temp folder: the sample book; a copy zipped as `.fb2.zip`; a Russian TXT saved as cp1251,
 KOI8-R, CP866, UTF-16 LE with BOM and UTF-8 (the unit tests' `encodeSingleByte` shows how to produce single-byte
 encodings); a hard-wrapped English TXT with `CHAPTER I` headings and Gutenberg start/end markers; an FB2 with a
-wrong XML encoding declaration.
+wrong XML encoding declaration; PDF books: a document exported to PDF from a word processor (with
+headings and an outline), a LaTeX PDF (hyphenation, footnotes, two columns if you have one), a PDF with pictures,
+and copies that are truncated, renamed to `.txt`, or encrypted without a user password (qpdf `--encrypt`).
 
 - [ ] First start (empty settings folder): Day theme, one page, instant turns, welcome screen; window 1180 × 820.
 - [ ] Every test book opens with correct text, contents and title; the TXT encodings are detected; Gutenberg
       boilerplate is gone; chapter headings are in Contents.
+- [ ] PDF books open as reflowable text in the book font: no running heads or page numbers, words hyphenated at
+      line ends are joined, paragraphs continue across pages, headings and the outline (as Contents) are right,
+      pictures appear in reading order, a two-column page is read column by column; zoom and themes work as for
+      FB2. A PDF renamed to `.txt` still opens as a PDF; a truncated or encrypted (no user password) copy opens.
 - [ ] Keys of spec 01 § 4 / spec 09 all work, including Home/End, Ctrl+G, T, F1, Ctrl+Comma, C / Shift+C,
       Ctrl+1…5, B, F10, F11, Alt+Enter, Esc (closes Menu first, then the panel).
 - [ ] Ctrl+wheel, Ctrl+Plus/Minus and Ctrl+0 zoom with reflow: the line being read stays on screen; window
@@ -107,12 +130,13 @@ wrong XML encoding declaration.
 - [ ] Clicking a footnote number shows the note pop-up; a web link opens the browser.
 - [ ] Ctrl+F finds the sample book by file name, by title ("Lamplighter"), by author ("Wren"), and by a phrase
       from the text with *content* search on; `Толстой`/`Tolstoy`/`Tolstoj` find `Tolstoy_*.fb2.zip`; an empty
-      query lists every book; results stream in while the search runs.
+      query lists every book, PDFs with their title and author; a phrase is found inside a PDF with
+      content search; results stream in while the search runs.
 - [ ] Ctrl+Shift+F finds "lamp oil" (2 matches) and jumps with highlight.
 - [ ] Quit and restart: the same book opens at the same place, with the same window, font and theme; a renamed
       copy of the book still resumes (fingerprint).
 - [ ] Idle CPU use is 0 % with a book open and nothing happening.
-- [ ] About shows `Lanternleaf 0.6.0`, "© 2026 Vitali Pinzari. Released under the MIT License.", the system
+- [ ] About shows `Lanternleaf 0.7.0`, "© 2026 Vitali Pinzari. Released under the MIT License.", the system
       description (`Windows x64`) and the licences section with `THIRD-PARTY-NOTICES.txt`.
 
 ## 4. The log
@@ -121,16 +145,18 @@ wrong XML encoding declaration.
 of the sample book, for comparison (the GL version and timings vary by machine):
 
 ```text
-Lanternleaf 0.6.0, OpenGL 4.1.0 NVIDIA 610.88
+Lanternleaf 0.7.0, OpenGL 4.1.0 NVIDIA 610.88
 opened D:\projects\BookReader\ai\reference\sample-book.fb2: FB2, UTF-8, 50 blocks, 5639 chars, parse 1 ms, first page 0 ms
 page count: 8 pages, 2 ms of work
 screenshot written: <out.png>
 instant page turns: 0 shown from the pages prepared ahead, 2 drawn on the spot
 ```
 
-The `page count` line appears only when the status bar shows (pages are counted only then) and the last line only
-after at least one page turn. In normal use, leaving the app writes the instant-turn statistic as the last line;
-with instant turns most turns should come "from the pages prepared ahead".
+For a PDF the format and encoding read `PDF, PDF 1.7` (the version in the file's header), for example
+`opened …\book.pdf: PDF, PDF 1.7, 7318 blocks, 1176858 chars, parse 726 ms, first page 1 ms` for a
+350-page book. The `page count` line appears only when the status bar shows (pages are counted only then) and
+the last line only after at least one page turn. In normal use, leaving the app writes the instant-turn
+statistic as the last line; with instant turns most turns should come "from the pages prepared ahead".
 
 ## 5. Android device checks
 
@@ -152,7 +178,7 @@ console, landscape lock, screenshots): spec 11 § 7. On a phone-sized emulator (
       toolbar and panels stay clear of the camera cutout and system bars but not of the gesture zones.
 - [ ] The page-number field of the status bar opens the number pad; search fields get no auto-capitalisation or
       autocorrect.
-- [ ] "Open with Lanternleaf" works for FB2, `.fb2.zip` and TXT from a file manager; the book reopens after a
+- [ ] "Open with Lanternleaf" works for FB2, `.fb2.zip`, TXT and PDF from a file manager; the book reopens after a
       restart.
 - [ ] About shows `Android (API 34) x64` on the x86_64 emulator and the storage-access state.
 

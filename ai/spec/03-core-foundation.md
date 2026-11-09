@@ -1,6 +1,6 @@
 # 03 — Core foundation: Unicode, encodings, XML, document model, files, images
 
-This part specifies six translation units of the portable `ll_core` library: `src/core/Unicode.cpp`, `src/core/Encoding.cpp`, `src/core/XmlReader.cpp`, `src/core/Document.cpp`, `src/core/FileUtil.cpp` and `src/core/ImageCodec.cpp`. Together they provide UTF-8 handling and character classes, charset detection and conversion, the forgiving XML pull parser, the book-model helpers (web-address linking, span lookup, TOC lookup, plain text), small file helpers and the stb-based image codec. Their headers (`Unicode.h`, `Encoding.h`, `XmlReader.h`, `Document.h`, `FileUtil.h`, `ImageCodec.h`), `core/BookLoader.h` (which declares `pathFromUtf8`) and `tests/core_tests.cpp` are in `ai/files/` verbatim. Their declarations are referred to by name here and not repeated. The goal is identical observable behaviour: for every input, each function must return exactly what the original returns. That includes how it treats malformed data and every quirk described below. The quirks are part of the copy; do not "fix" them. None of these files uses SDL, OpenGL, locales or mutable global state. Everything is in `namespace ll`, and file-local helpers sit in an anonymous namespace inside it.
+This part specifies six translation units of the portable `ll_core` library: `src/core/Unicode.cpp`, `src/core/Encoding.cpp`, `src/core/XmlReader.cpp`, `src/core/Document.cpp`, `src/core/FileUtil.cpp` and `src/core/ImageCodec.cpp`. Together they provide UTF-8 handling and character classes, charset detection and conversion, the forgiving XML pull parser, the book-model helpers (web-address linking, span lookup, TOC lookup, plain text), small file helpers and the stb-based image codec (which hands pictures from PDF files that still carry PDF filters to the PDF reader, spec 15). Their headers (`Unicode.h`, `Encoding.h`, `XmlReader.h`, `Document.h`, `FileUtil.h`, `ImageCodec.h`), `core/BookLoader.h` (which declares `pathFromUtf8`) and `tests/core_tests.cpp` are in `ai/files/` verbatim. Their declarations are referred to by name here and not repeated. The goal is identical observable behaviour: for every input, each function must return exactly what the original returns. That includes how it treats malformed data and every quirk described below. The quirks are part of the copy; do not "fix" them. None of these files uses SDL, OpenGL, locales or mutable global state. Everything is in `namespace ll`, and file-local helpers sit in an anonymous namespace inside it.
 
 ## 0. Notation
 
@@ -955,7 +955,7 @@ There is no fsync and no directory creation. If the second rename fails, the fun
 
 ### 6.1 stb configuration
 
-The file includes `<cstdio>`, `<cstring>`, `<filesystem>`, `<fstream>` and `<string>`, then the following block verbatim. This is the only translation unit in the project that compiles the stb implementations:
+The file includes `core/PdfReader.h` (for the PDF picture container, spec 15), then `<cstdio>`, `<cstring>`, `<filesystem>`, `<fstream>` and `<string>`, then the following block verbatim. This is the only translation unit in the project that compiles the stb implementations:
 
 ```cpp
 #define STB_IMAGE_IMPLEMENTATION
@@ -982,15 +982,17 @@ The headers come from the vcpkg `stb` port (`${Stb_INCLUDE_DIR}`, pinned baselin
 
 1. Sets `width = height = 0`.
 2. Returns false if `!data || size == 0 || size > 0x7fffffff`.
-3. Otherwise, with a local `int comp`, returns `stbi_info_from_memory(data, int(size), &width, &height, &comp) != 0 && width > 0 && height > 0`.
+3. If `pdf::isImageContainer(data, size)` (at least 16 bytes that start with the 8-byte magic `LLPDFIM1` of a picture taken from a PDF file, spec 15): returns `pdf::imageContainerSize(data, size, width, height)`.
+4. Otherwise, with a local `int comp`, returns `stbi_info_from_memory(data, int(size), &width, &height, &comp) != 0 && width > 0 && height > 0`.
 
 Only the header is read; the sizes are written by stb.
 
 ### 6.3 `decodeImageRgba(data, size, rgba, width, height)`
 
 1. Sets `width = height = 0`, with the same guard as above (return false).
-2. Calls `px = stbi_load_from_memory(data, int(size), &width, &height, &comp, 4)` (4 channels requested). If `px` is null, returns false and leaves `rgba` untouched.
-3. Otherwise does `rgba.assign(px, px + size_t(width) * height * 4)`, calls `stbi_image_free(px)` and returns true. The output is tightly packed RGBA8, top row first.
+2. If `pdf::isImageContainer(data, size)`: returns `pdf::decodeImageContainer(data, size, rgba, width, height)` (pictures from PDF files whose samples are still compressed with PDF filters).
+3. Calls `px = stbi_load_from_memory(data, int(size), &width, &height, &comp, 4)` (4 channels requested). If `px` is null, returns false and leaves `rgba` untouched.
+4. Otherwise does `rgba.assign(px, px + size_t(width) * height * 4)`, calls `stbi_image_free(px)` and returns true. The output is tightly packed RGBA8, top row first.
 
 ### 6.4 `writePngRgba(utf8Path, rgba, width, height)`
 
@@ -1001,7 +1003,7 @@ Only the header is read; the sizes are written by stb.
 
 ### 6.5 Tests
 
-`testFb2`: the FB2 sample embeds a 1×1 PNG cover, which `Fb2Parser::finishBinary` probes with `probeImageSize`. On failure it would clear the image bytes. `decodeImageRgba` is used by the app for textures and `writePngRgba` by the screenshot/self-test mode; neither has a direct unit test.
+`testFb2`: the FB2 sample embeds a 1×1 PNG cover, which `Fb2Parser::finishBinary` probes with `probeImageSize`. On failure it would clear the image bytes. `decodeImageRgba` is used by the app for textures and `writePngRgba` by the screenshot/self-test mode; neither has a direct unit test. `testPdf` decodes a 2×2 RGB picture through the PDF container (spec 15).
 
 ---
 

@@ -56,12 +56,14 @@ Behaviour of external helpers that this file relies on:
   (newlines included) into one `' '` and drops leading and trailing white space; `utf8PrevPos`/`utf8NextPos` step one
   code point; `toLowerUtf8` lower-cases with `toLowerCp`; `iequalsAscii` compares with ASCII case folding.
 - `formatFromName` (BookLoader): by ASCII-case-insensitive suffix, in this order: `.fb2.zip` → `Fb2Zip`, `.txt.zip` →
-  `TxtZip`, `.zip` → `Zip`, `.fb2` → `Fb2`, `.txt` → `Txt`, otherwise `Unknown`; `isSupportedBookName` is
-  `formatFromName != Unknown`. `fileStemOf` takes the part after the last `/` or `\` and strips up to two of the
-  extensions `.zip`, `.fb2`, `.txt` (case-insensitive), e.g. `Tolstoy_Anna.fb2.zip` → `Tolstoy_Anna`.
+  `TxtZip`, `.zip` → `Zip`, `.fb2` → `Fb2`, `.txt` → `Txt`, `.pdf` → `Pdf`, otherwise `Unknown`;
+  `isSupportedBookName` is `formatFromName != Unknown`. `fileStemOf` takes the part after the last `/` or `\` and
+  strips up to two of the extensions `.zip`, `.fb2`, `.txt`, `.pdf` (case-insensitive), e.g.
+  `Tolstoy_Anna.fb2.zip` → `Tolstoy_Anna`.
 - `loadBookMeta(path, meta, err)` reads metadata cheaply (zip archives, even mis-named ones, are unpacked: first
-  `.fb2` entry, else the largest `.txt`); returns false for unreadable files, archives without a book, and files
-  named `.zip`/`.fb2.zip`/`.txt.zip` that are not zip archives.
+  `.fb2` entry, else the largest `.txt`; a PDF's document information comes from the head and tail of the file);
+  returns false for unreadable files, archives without a book, files named `.zip`/`.fb2.zip`/`.txt.zip` that are
+  not zip archives, files named `.pdf` that are not PDF files, and damaged or password-protected PDF files.
   `loadBookText(path, text, meta, err)` returns the whole readable text plus metadata. Both set `meta.title` to the
   file stem when the book has none, and append ` (zip)` to `meta.format` for archives.
 - `BookMeta::authorsJoined()` joins the non-empty authors with `", "`.
@@ -531,8 +533,8 @@ offline = opt.skipContent && opt.skipContent(path)
 haveRec = cache_.get(path, size, mtime, rec)
 ```
 
-The size/name filters apply to plain `.txt` only (not to `.txt.zip`, `.fb2.zip`, `.zip`, `.fb2`); only a zero size
-excludes every format. `books_` counts the files that pass these filters, before any metadata is read.
+The size/name filters apply to plain `.txt` only (not to `.txt.zip`, `.fb2.zip`, `.zip`, `.fb2`, `.pdf`); only a
+zero size excludes every format. `books_` counts the files that pass these filters, before any metadata is read.
 
 `ensureMeta()` (a lambda; makes `rec` valid and tells whether the file is a book):
 

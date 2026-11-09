@@ -8,14 +8,16 @@ that every later iteration of the copy follows. All text files here are verbatim
 ## 1. `README.md` (verbatim, MIT edition)
 
 The user manual and developer overview, in this order: title and one-paragraph pitch; platforms and stack;
-version line ("Version 0.6.0 · © 2026 Vitali Pinzari. Released under the MIT License (see [LICENSE](LICENSE)).");
+version line ("Version 0.7.0 · © 2026 Vitali Pinzari. Released under the MIT License (see [LICENSE](LICENSE)).");
 a four-image table (*Day, two pages* / *Night amber* / *3D page curl* / *Two-page turn*); the note on the name;
-**Features**; **Building** (Visual Studio 2026, `build.ps1` options, the release folder and the version);
-**Android** (`build-android.ps1`, requirements, signing, what is different on a phone, what to do when no books
-show up); **Using it** (key table, data folder `%APPDATA%\Lanternleaf\`); **Why these night themes** (the
-literature behind Day/Sepia, blue light and melatonin, Dusk, Night amber, Night red); **Architecture** (folders,
-key design decisions, how the Android build is put together); **Testing** (`ll_tests` coverage, screenshot mode
-with its full option synopsis, the log); **Known limitations**; **Credits and licences**.
+**Features** (with the three formats FB2, TXT and PDF); **Building** (Visual Studio 2026, `build.ps1` options,
+the release folder and the version, the Windows installer `build-msi.ps1`); **Android** (`build-android.ps1`,
+requirements, signing, what is different on a phone, what to do when no books show up); **Using it** (key
+table, data folder `%APPDATA%\Lanternleaf\`); **Why these night themes** (the literature behind Day/Sepia, blue
+light and melatonin, Dusk, Night amber, Night red); **Architecture** (folders, key design decisions, how the
+Android build is put together); **Testing** (`ll_tests` coverage including PDF, screenshot mode with its full
+option synopsis, the log); **Known limitations** (including what PDF pages lose by being reflowed); **Credits
+and licences**.
 
 It is reproduced byte for byte (CRLF line endings, as the bundle states). Some of its statements describe the
 history of the original working folder (for example the release folder example still names 0.2.0 files); keep
@@ -24,7 +26,7 @@ them as they are — the README is part of the exact copy.
 ## 2. README screenshots (`docs/`)
 
 The README links four PNGs. The original's were rendered from A. P. Chekhov's «Степь» (public domain) in screenshot
-mode by earlier versions of the app; render them again with your 0.6.0 build so they show the current look:
+mode by earlier versions of the app; render them again with your 0.7.0 build so they show the current look:
 
 | File | Size | Command options (plus `--settings-dir <fresh tmp> --screenshot docs\<file>`) |
 |---|---|---|
@@ -52,7 +54,9 @@ stays unchanged; this regeneration prompt lives in `ai/PROMPT.md`.
   Description, Screenshot, AppVersionFound, Status) with an empty `##bugs` section. Screenshots of bugs sit next to
   the report.
 - `features/prompt.md` — the rules of the feature folder; `features/features.md` — the feature list template
-  (Platform, Description, Status) with an empty `## features` section.
+  (Platform, Description, Status). Its `## features` section holds one entry, *PDF books* (the request, a
+  summary of the implementation and `Status: implemented (0.7.0)`): it waits for the developer's verification,
+  after which it moves to `CHANGELIST.md` under 0.7.0.
 
 The life cycle the rules define: an item is *Reported/Requested* → the agent or developer who fixes it marks it
 *Fixed/Implemented* (with the version) → the developer tests it and marks it *Verified/Confirmed* → on the next
@@ -61,9 +65,10 @@ developer marks items verified.
 
 ## 5. Release habits (for every later iteration of the copy)
 
-- Every delivered iteration bumps `VERSION` (patch or minor) and is built for both platforms; the staged files
-  carry the version (`release/Windows/Lanternleaf-<version>.exe`, `release/Android/Lanternleaf-<version>.apk`) and
-  older versions stay next to them.
+- Every delivered iteration bumps `VERSION` (patch or minor) and is built for both platforms, plus the Windows
+  installer (`./build-msi.ps1`); the staged files carry the version (`release/Windows/Lanternleaf-<version>.exe`,
+  `release/Android/Lanternleaf-<version>.apk`, `release/Installer/Lanternleaf-<version>-x64.msi`) and older
+  versions stay next to them.
 - After a build, report the release paths. If staging warns that the exe could not be replaced, that version is
   running: never kill the process; the folder refreshes on the next build after it is closed.
 - Android changes are checked on an emulator as in spec 11 § 7 (read-only AVD if it holds someone's data).

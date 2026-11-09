@@ -82,7 +82,7 @@ Both source files are pure ASCII. Every non-ASCII character in a literal is writ
 
 All quotation marks inside UI texts are ASCII `"` (U+0022, written `\"` in the literals). Apostrophes are ASCII `'`. The `...` in labels such as `Add folder...`, `Searching...`, `Counting the pages...` is three ASCII full stops, not U+2026. Runs of spaces (U+0020) are given with their count where they matter. Line breaks inside labels and texts are `"\n"` (U+000A). There are no other invisible characters.
 
-Macros used in texts come from the generated `app/Version.h` (template `src/app/Version.h.in`, values from the verbatim CMake files): `kAppVersion` = `LL_VERSION` = `"0.6.0"`, `LL_DEVELOPER` = `"Vitali Pinzari"`, `LL_COPYRIGHT` = `"\xC2\xA9 2026 Vitali Pinzari"` (`© 2026 Vitali Pinzari`).
+Macros used in texts come from the generated `app/Version.h` (template `src/app/Version.h.in`, values from the verbatim CMake files): `kAppVersion` = `LL_VERSION` = `"0.7.0"`, `LL_DEVELOPER` = `"Vitali Pinzari"`, `LL_COPYRIGHT` = `"\xC2\xA9 2026 Vitali Pinzari"` (`© 2026 Vitali Pinzari`).
 
 ### 1.4 What App.cpp provides (spec 09), for context only
 
@@ -903,7 +903,7 @@ The window title is `Library`, and its close button writes into the local `open`
    - Once a search has been started in this session (`searchStarted_`):
      - While running: `ImGui::Text("Searching... %llu folders, %llu files, %llu books, %d found", p.dirs, p.files, p.books, hits_.size())`, with casts to `unsigned long long` and `int`. On a wide panel this is followed by the folder being scanned. `maxW = GetContentRegionAvail().x * 0.55f`. `dir = p.currentDir`, and while `dir` is wider than `maxW` its first code point is removed (`dir.erase(0, utf8NextPos(dir, 0))`, so the end of the path stays). Then `SameLine()` and `TextDisabled("%s", dir)`.
      - Finished: `ImGui::TextWrapped("%s in %.1f s: %llu files in %llu folders, %llu books checked, %d found.", p.cancelled ? "Stopped" : "Done", p.seconds, p.files, p.dirs, p.books, hits_.size())`.
-   - Before any search: in the disabled colour (`PushStyleColor(ImGuiCol_Text, TextDisabled colour)`), `ImGui::TextWrapped("Tip: leave the query empty to list every FB2/TXT book in the chosen folders.")`.
+   - Before any search: in the disabled colour (`PushStyleColor(ImGuiCol_Text, TextDisabled colour)`), `ImGui::TextWrapped("Tip: leave the query empty to list every FB2/TXT/PDF book in the chosen folders.")`.
 6. Results table, named `narrow ? "##hitsN" : "##hits"`, so the narrow and wide tables keep separate column and sort states. It has `narrow ? 2 : 5` columns, flags `RowBg | ScrollY | Resizable | BordersInnerV | Sortable | SizingStretchProp` (all `ImGuiTableFlags_`), and size `ImVec2(0, ui::listHeight())`. Inside: `ui::touchScroll(s)`, `TableSetupScrollFreeze(0, 1)`, then the columns:
 
 | Column | Shown | Flags | Weight / width | Sort key (comparator `col`) |
@@ -1104,8 +1104,8 @@ The note after `Pages on screen` appears when `settings_.columns == "2" && !twoP
 
 `placePanel()`, `focusIfRequested(Panel::Help)`, `ImGui::Begin("Help", &showHelp_, panelFlags)` (if false: `End()`, return), `ui::touchScroll(s)`. Then, in order:
 
-1. `ImGui::Text("Lanternleaf %s", kAppVersion)`, which shows `Lanternleaf 0.6.0`. Then `SameLine()` and `SmallButton("About")` → `showPanel(Panel::About)`, which replaces Help.
-2. In the disabled colour (`PushStyleColor(ImGuiCol_Text, TextDisabled colour)` … `PopStyleColor()`): `ImGui::TextWrapped("A reader for FB2 and TXT books, drawn entirely on the GPU (OpenGL). %s.", LL_COPYRIGHT)`, which shows `… (OpenGL). © 2026 Vitali Pinzari.`.
+1. `ImGui::Text("Lanternleaf %s", kAppVersion)`, which shows `Lanternleaf 0.7.0`. Then `SameLine()` and `SmallButton("About")` → `showPanel(Panel::About)`, which replaces Help.
+2. In the disabled colour (`PushStyleColor(ImGuiCol_Text, TextDisabled colour)` … `PopStyleColor()`): `ImGui::TextWrapped("A reader for FB2, TXT and PDF books, drawn entirely on the GPU (OpenGL). %s.", LL_COPYRIGHT)`, which shows `… (OpenGL). © 2026 Vitali Pinzari.`.
 3. Touch screens only: `SeparatorText("Touch")`, then a table `##touch` with 2 columns and flags `ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp`. The columns are `What` (`WidthStretch`, 0.4) and `How` (`WidthStretch`, 0.6). They are set up but no header row is drawn. Rows are added with `helpRow`, in this order:
 
 | # | What | How |
@@ -1131,7 +1131,7 @@ The note after `Pages on screen` appears when `settings_.columns == "2" && !twoP
 | 3 | `First / last page` | `Home / End` |
 | 4 | `Bigger / smaller text` | `Ctrl + mouse wheel, Ctrl+Plus / Ctrl+Minus, two-finger pinch` |
 | 5 | `Default text size` | `Ctrl+0` |
-| 6 | `Open a book` | `Ctrl+O, or drag an FB2/TXT/ZIP file onto the window` |
+| 6 | `Open a book` | `Ctrl+O, or drag an FB2/TXT/PDF/ZIP file onto the window` |
 | 7 | `Find books on your drives` | `Ctrl+F` |
 | 8 | `Find in this book` | `Ctrl+Shift+F` |
 | 9 | `Recent books` | `Ctrl+L` |
@@ -1179,8 +1179,8 @@ The note after `Pages on screen` appears when `settings_.columns == "2" && !twoP
   ImGui::SameLine();
   ImGui::TextDisabled("%s", platform::systemDescription().c_str());
   ImGui::Spacing();
-  ImGui::TextWrapped("A reader for FB2 and TXT books, drawn with OpenGL: justified, hyphenated text in English and "
-                     "Russian, a 3D page curl, colour themes for day and night, and a search that finds books "
+  ImGui::TextWrapped("A reader for FB2, TXT and PDF books, drawn with OpenGL: justified, hyphenated text in English "
+                     "and Russian, a 3D page curl, colour themes for day and night, and a search that finds books "
                      "anywhere on your drives.");
   ImGui::Spacing();
   ImGui::Text("%s. Released under the MIT License.", LL_COPYRIGHT);
@@ -1224,9 +1224,9 @@ The note after `Pages on screen` appears when `settings_.columns == "2" && !twoP
   ImGui::End();
 ```
 
-The copyright line `ImGui::Text("%s. Released under the MIT License.", LL_COPYRIGHT);` is the only intended difference from the 0.6.0 About panel.
+The copyright line `ImGui::Text("%s. Released under the MIT License.", LL_COPYRIGHT);` is the MIT wording of `ai/PROMPT.md` § 7 (up to 0.6.0 the original said "All rights reserved" here).
 
-What it shows: `Lanternleaf` in a 1.9× larger font. Then `Version 0.6.0`, followed on the same line by the system description in the disabled colour (`platform::systemDescription()`, for example `Windows x64` or `Android (API 34) arm64`). Then the description paragraph, and `© 2026 Vitali Pinzari. Released under the MIT License.` and `Developer: Vitali Pinzari`. On touch screens a section `This device` follows, with `Access to files: allowed` or `Access to files: not allowed` plus a small `Allow` button. The `Allow` button asks Android for "All files access" and forces the access state to be checked again on the next call. Then come the four credit paragraphs, separated by line breaks, and a collapsing header `Licences of these components`, closed by default. The first time that header is opened, the bundled asset `licenses/THIRD-PARTY-NOTICES.txt` is read once into `noticesText_` and kept for the rest of the session. If the asset is missing, the text is `The licence texts are missing from this installation.`, and that text is also cached.
+What it shows: `Lanternleaf` in a 1.9× larger font. Then `Version 0.7.0`, followed on the same line by the system description in the disabled colour (`platform::systemDescription()`, for example `Windows x64` or `Android (API 34) arm64`). Then the description paragraph, and `© 2026 Vitali Pinzari. Released under the MIT License.` and `Developer: Vitali Pinzari`. On touch screens a section `This device` follows, with `Access to files: allowed` or `Access to files: not allowed` plus a small `Allow` button. The `Allow` button asks Android for "All files access" and forces the access state to be checked again on the next call. Then come the four credit paragraphs, separated by line breaks, and a collapsing header `Licences of these components`, closed by default. The first time that header is opened, the bundled asset `licenses/THIRD-PARTY-NOTICES.txt` is read once into `noticesText_` and kept for the rest of the session. If the asset is missing, the text is `The licence texts are missing from this installation.`, and that text is also cached.
 
 ## 15. Footnote pop-up: `drawFootnote()`
 
@@ -1332,7 +1332,7 @@ This is drawn while `storagePromptOpen_`. App.cpp sets that flag at start-up on 
 1. If `storageAccess()` is true: `storagePromptOpen_ = false`, return.
 2. The window is centred at (50 %, 45 %) of the viewport (`SetNextWindowPos(…, ImGuiCond_Always, ImVec2(0.5f, 0.5f))`). Its width is `std::min(560.0f * s, vp->Size.x * 0.92f)` with automatic height (`SetNextWindowSize(ImVec2(w, 0), ImGuiCond_Always)`). `SetNextWindowFocus()` is called every frame.
 3. `Begin("Your books###storage", nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize)`. The title is `Your books`, with no close button. Contents:
-   - `TextWrapped("Lanternleaf finds and opens FB2 and TXT books wherever they are on this device: Download, " "Documents, Books, Telegram, SD cards. Android allows that only with \"All files access\".")`
+   - `TextWrapped("Lanternleaf finds and opens FB2, TXT and PDF books wherever they are on this device: " "Download, Documents, Books, Telegram, SD cards. Android allows that only with \"All files " "access\".")`
    - `Spacing()`
    - `TextWrapped("Tap \"Allow access\", switch on \"Allow access to manage all files\" for Lanternleaf, then " "come back. Lanternleaf only reads books; it never changes your files.")`
    - `Spacing()`
@@ -1353,7 +1353,8 @@ void App::openFileDialog() {
     openFileBrowser(false);
     return;
   }
-  static const SDL_DialogFileFilter kFilters[] = {{"Books (FB2, TXT, FB2.ZIP)", "fb2;txt;zip"}, {"All files", "*"}};
+  static const SDL_DialogFileFilter kFilters[] = {{"Books (FB2, TXT, PDF, FB2.ZIP)", "fb2;txt;pdf;zip"},
+                                                  {"All files", "*"}};
   std::string dir;
   if (!bookPath_.empty()) dir = dirOf(bookPath_);
   if (dir.empty()) {
@@ -1392,7 +1393,7 @@ void App::addFolderDialog() {
 }
 ```
 
-- On desktops the file dialog has two filters: `Books (FB2, TXT, FB2.ZIP)` (patterns `fb2;txt;zip`) and `All files` (`*`). It allows a single selection. It starts in the folder of the open book, else in the first default search root (normally Downloads), else in SDL's default location. The chosen file is opened on the main thread by `pollAsync`.
+- On desktops the file dialog has two filters: `Books (FB2, TXT, PDF, FB2.ZIP)` (patterns `fb2;txt;pdf;zip`) and `All files` (`*`). It allows a single selection. It starts in the folder of the open book, else in the first default search root (normally Downloads), else in SDL's default location. The chosen file is opened on the main thread by `pollAsync`.
 - The folder dialog allows several folders and has no default location. `pollAsync` adds the chosen folders to the search roots.
 - On touch screens both open the in-app file browser (§19): in file mode for Open, in folder mode for Add folder.
 
@@ -1478,7 +1479,7 @@ The listing hides names starting with `.` and keeps only folders and supported b
 5. `Up` button, disabled when `parentOf(browser_.dir)` is empty or equals `browser_.dir` (at a root). It calls `browseTo(parentOf(browser_.dir))`. Then `SameLine()` and `TextWrapped("%s", browser_.dir)`, which is the current path.
 6. Folder mode only: `Button("Search this folder for books")`. It appends `browser_.dir` to `settings_.searchRoots` if it is not listed, calls `scheduleSave()`, sets `browser_.open = false`, then `showPanel(Panel::Library, 1)`: back to "Find books", where the folder is now listed.
 7. `Separator()`.
-8. If `browser_.error` is set: `TextDisabled("%s", error)`. Otherwise, if there are no entries: `TextDisabled("No folders or FB2/TXT books here.")`.
+8. If `browser_.error` is set: `TextDisabled("%s", error)`. Otherwise, if there are no entries: `TextDisabled("No folders or FB2/TXT/PDF books here.")`.
 9. The list: `BeginChild("##entries", ImVec2(0, ui::listHeight()))`, with no border and full width. When `BeginChild` returns true:
    - if `browser_.scrollTop`: `SetScrollY(0)` and `scrollTop = false`;
    - `ui::touchScroll(s)`;
@@ -1571,8 +1572,8 @@ Panels
 - [ ] Settings ranges and formats: Size 10–72 `%.0f px`, Line spacing 1.0–2.2 `%.2f`, Side margins 0–20 `%.0f %%`, First-line indent 0–4 `%.1f em`, Space between paragraphs 0–1.5 `%.1f em`, Max line length 20–80 `%.0f em`, Brightness 0.2–1.0 `%.2f`, Night starts/ends 0–23 `%d:00`, Duration 0.15–1.2 `%.2f s`, Screen brightness 1–100 `%.0f %%` (+ ` (system)`). With `Instant` chosen, the Duration slider is replaced by its note.
 - [ ] The Settings layout changes (spacing, margins, indent, paragraph space, justify, hyphenation, line length) re-lay out the page at once and are saved.
 - [ ] Go to: the slider shows `42.3 %`. The page input is clamped to 1…page count, followed by `Page N of M`. While pages are counted it shows `Counting pages... 37%` instead of the page input.
-- [ ] Help: `Lanternleaf 0.6.0` with a small `About` button. On touch screens it has the `Touch` table (11 rows) and a collapsed `Keyboard and mouse` header; on desktops the `Keyboard, mouse and touch` table (19 rows). Then `Why these colour themes` and `Credits`.
-- [ ] About: `Lanternleaf` at 1.9× size, `Version 0.6.0` with the system description, the description paragraph, `© 2026 Vitali Pinzari. Released under the MIT License.`, and `Developer: Vitali Pinzari`. On touch screens it adds `This device` / `Access to files: …`. Then Credits and the collapsed `Licences of these components`, which shows the notices asset.
+- [ ] Help: `Lanternleaf 0.7.0` with a small `About` button. On touch screens it has the `Touch` table (11 rows) and a collapsed `Keyboard and mouse` header; on desktops the `Keyboard, mouse and touch` table (19 rows). Then `Why these colour themes` and `Credits`.
+- [ ] About: `Lanternleaf` at 1.9× size, `Version 0.7.0` with the system description, the description paragraph, `© 2026 Vitali Pinzari. Released under the MIT License.`, and `Developer: Vitali Pinzari`. On touch screens it adds `This device` / `Access to files: …`. Then Credits and the collapsed `Licences of these components`, which shows the notices asset.
 
 Pop-ups
 
@@ -1584,8 +1585,8 @@ Pop-ups
 
 Dialogs and file browser
 
-- [ ] Desktop Open uses the system file dialog with `Books (FB2, TXT, FB2.ZIP)` (`fb2;txt;zip`) and `All files` (`*`), starting in the open book's folder. Desktop Add folder uses a multi-selection folder dialog, and the folders join the search list.
+- [ ] Desktop Open uses the system file dialog with `Books (FB2, TXT, PDF, FB2.ZIP)` (`fb2;txt;pdf;zip`) and `All files` (`*`), starting in the open book's folder. Desktop Add folder uses a multi-selection folder dialog, and the folders join the search list.
 - [ ] On touch screens Open shows the in-app browser `Open a book`, and Add folder shows `Choose a folder to search`.
-- [ ] Browser: place buttons `Device storage`, `Card <volume>` and the default folder names. `Up` is disabled at a root, and the current path is shown. Folders come first, in the accent colour with a trailing `/`, then files as `name   1.2 MB`, each group alphabetical ignoring case. Dot names and non-book files are hidden. An empty folder shows `No folders or FB2/TXT books here.`, and an unreadable one shows `This folder cannot be read.` or `Lanternleaf has no access to your files yet.`.
+- [ ] Browser: place buttons `Device storage`, `Card <volume>` and the default folder names. `Up` is disabled at a root, and the current path is shown. Folders come first, in the accent colour with a trailing `/`, then files as `name   1.2 MB`, each group alphabetical ignoring case. Dot names and non-book files are hidden. An empty folder shows `No folders or FB2/TXT/PDF books here.`, and an unreadable one shows `This folder cannot be read.` or `Lanternleaf has no access to your files yet.`.
 - [ ] In folder mode files are greyed out, and `Search this folder for books` adds the folder and returns to the Find books tab with it listed.
 - [ ] On touch screens a finger drag on a list scrolls it and never opens the row under the finger. A vertical drag that starts on a slider scrolls the panel and leaves the value unchanged; a tap on a slider sets the value.

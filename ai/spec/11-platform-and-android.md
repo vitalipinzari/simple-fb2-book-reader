@@ -61,7 +61,7 @@ needs exactly these static methods of `app.lanternleaf.reader.LanternleafActivit
   grammatical gender, font scale/weight, orientation, UI mode, screen layout/size, smallest size, keyboard,
   keyboard hidden, navigation), minimal post-processing, soft input `stateAlwaysHidden|adjustNothing`, exported;
   intent filters MAIN/LAUNCHER and VIEW/SEND (DEFAULT + BROWSABLE) for `content:` and `file:` schemes with the
-  FB2/TXT/XML/ZIP MIME types listed in the file.
+  FB2/TXT/XML/ZIP/PDF MIME types listed in the file.
 - **Resources**: `values/strings.xml` (`app_name` "Lanternleaf"), `values/colors.xml` (`window_background` and
   `ic_launcher_background` `#FF16110D`), `values/styles.xml` (`AppTheme` = `android:Theme.Material.NoActionBar`
   with that colour for the window, status bar and navigation bar, cutout mode `shortEdges`),
@@ -196,8 +196,8 @@ GLES 3.1 on the host GPU).
 
 ## Checklist
 
-- `./build-android.ps1` produces `release/Android/Lanternleaf-0.6.0.apk`; `aapt2 dump badging` (or Android
-  Studio's APK analyser) shows package `app.lanternleaf.reader`, versionCode 600, versionName 0.6.0, minSdk 28,
+- `./build-android.ps1` produces `release/Android/Lanternleaf-0.7.0.apk`; `aapt2 dump badging` (or Android
+  Studio's APK analyser) shows package `app.lanternleaf.reader`, versionCode 700, versionName 0.7.0, minSdk 28,
   targetSdk 36, native code `arm64-v8a` and `x86_64`, and the assets `fonts/…`, `hyphenation/…`, `licenses/…`.
 - `apksigner verify --print-certs` shows your release certificate (not the debug key) when
   `keystore.properties` exists.

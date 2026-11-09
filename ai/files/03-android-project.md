@@ -11,7 +11,7 @@ Reproduce every file below **byte for byte** at the path in its heading. The fen
 | `android/gradle.properties` | 130 | `748f7a9e0472ae96…` |
 | `android/gradle/wrapper/gradle-wrapper.properties` | 281 | `c67b97cdfe41822d…` |
 | `android/app/build.gradle` | 3657 | `c465e1a467650528…` |
-| `android/app/src/main/AndroidManifest.xml` | 3432 | `9c9714e4bc4f1ec0…` |
+| `android/app/src/main/AndroidManifest.xml` | 3497 | `5e0fbfa40d01a7f2…` |
 | `android/app/src/main/res/values/colors.xml` | 177 | `8d507e36dc70c238…` |
 | `android/app/src/main/res/values/strings.xml` | 113 | `5e39e5236ee9e9d5…` |
 | `android/app/src/main/res/values/styles.xml` | 563 | `405f3b6701d08110…` |
@@ -245,7 +245,7 @@ ASCII, LF line endings, ends with a newline.
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- "Open with Lanternleaf" for FB2, TXT and zipped FB2 from file managers, browsers, messengers. -->
+            <!-- "Open with Lanternleaf" for FB2, TXT, PDF and zipped FB2 from file managers, browsers, messengers. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <action android:name="android.intent.action.SEND" />
@@ -263,6 +263,7 @@ ASCII, LF line endings, ends with a newline.
                 <data android:mimeType="application/xml" />
                 <data android:mimeType="application/zip" />
                 <data android:mimeType="application/x-zip-compressed" />
+                <data android:mimeType="application/pdf" />
             </intent-filter>
         </activity>
     </application>

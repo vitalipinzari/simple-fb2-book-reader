@@ -1,6 +1,6 @@
 # Source: every header, the entry point and the platform, theme and settings code
 
-Every header of the code base (the interfaces the specifications in ai/spec implement), the entry point, and the three .cpp files that are data or operating-system glue rather than algorithms: the colour themes, the settings file format and the platform layer. The other .cpp files are specified in ai/spec/03-10.
+Every header of the code base (the interfaces the specifications in ai/spec implement), the entry point, and the three .cpp files that are data or operating-system glue rather than algorithms: the colour themes, the settings file format and the platform layer. The other .cpp files are specified in ai/spec/03-10 and 15.
 
 Reproduce every file below **byte for byte** at the path in its heading. The fenced block holds the complete content (the fences are not part of the file); the line under each heading gives what a block cannot show: encoding, line endings and whether the file ends with a newline. `ai/files/checksums.sha256` has the SHA-256 of each file for checking.
 
@@ -12,10 +12,14 @@ Reproduce every file below **byte for byte** at the path in its heading. The fen
 | `src/core/XmlReader.h` | 1579 | `e9a9a6016aa311af…` |
 | `src/core/Document.h` | 3663 | `06027bbe2005651d…` |
 | `src/core/FileUtil.h` | 468 | `9b03450f023c2ac2…` |
-| `src/core/ImageCodec.h` | 723 | `696311857145df0f…` |
+| `src/core/ImageCodec.h` | 830 | `85002fe72c1e1906…` |
 | `src/core/Fb2Parser.h` | 900 | `0c5d076f08796f96…` |
 | `src/core/TxtParser.h` | 993 | `ccc84b8cf29eceda…` |
-| `src/core/BookLoader.h` | 1698 | `b5b56f11191f5073…` |
+| `src/core/PdfReader.h` | 10014 | `2a74655da684af5c…` |
+| `src/core/PdfCrypt.h` | 1884 | `95e374ec158723f0…` |
+| `src/core/PdfContent.h` | 2876 | `46d96c2d61621561…` |
+| `src/core/PdfParser.h` | 1524 | `fa096a6fac12f8b5…` |
+| `src/core/BookLoader.h` | 1778 | `23e33e21a980c1a1…` |
 | `src/core/Hyphenator.h` | 1635 | `d066f3b9fff55496…` |
 | `src/core/LineBreaker.h` | 1934 | `ce054f2e0656385b…` |
 | `src/core/LibrarySearch.h` | 5046 | `f9f3bb4f380acffe…` |
@@ -392,7 +396,8 @@ uint64_t fileSize(const std::string& path);
 ASCII, LF line endings, ends with a newline.
 
 ```cpp
-// Lanternleaf - image probing/decoding for pictures embedded in books (stb_image).
+// Lanternleaf - image probing/decoding for pictures embedded in books (stb_image; PDF pictures whose samples
+// still carry PDF filters are decoded by the PDF reader, see core/PdfReader.h).
 #pragma once
 
 #include <cstddef>
@@ -480,6 +485,400 @@ void guessMetaFromFileStem(std::string_view stem, BookMeta& meta);
 }  // namespace ll
 ```
 
+## `src/core/PdfReader.h`
+
+ASCII, LF line endings, ends with a newline.
+
+```cpp
+// Lanternleaf - minimal PDF file reader (ISO 32000-1): objects, cross-reference tables and streams, object streams,
+// the standard stream filters and the standard security handler (files that open without a password).
+// Read-only and tolerant: a damaged cross-reference table is rebuilt by scanning the file for objects.
+#pragma once
+
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+namespace ll::pdf {
+
+enum class ObjType : uint8_t { Null, Bool, Int, Real, Name, String, Array, Dict, Stream, Ref, Keyword };
+
+struct Object;
+using Array = std::vector<Object>;
+using Dict = std::vector<std::pair<std::string, Object>>;
+
+struct Object {
+  ObjType type = ObjType::Null;
+  bool flag = false;           // Bool: the value; String: written as <hex>
+  int gen = 0;                 // Ref: generation number
+  int64_t i = 0;               // Int: the value; Ref: object number
+  double r = 0;                // Real: the value
+  std::string s;               // Name (without '/'), String (raw bytes), Keyword
+  std::shared_ptr<Array> a;    // Array
+  std::shared_ptr<Dict> d;     // Dict, and the dictionary of a Stream
+  uint64_t streamOffset = 0;   // Stream: file offset of the first data byte
+  int objNum = 0, objGen = 0;  // Stream: the indirect object it belongs to (needed to decrypt it)
+
+  bool isNull() const { return type == ObjType::Null; }
+  bool isNumber() const { return type == ObjType::Int || type == ObjType::Real; }
+  bool isName() const { return type == ObjType::Name; }
+  bool isName(std::string_view n) const { return type == ObjType::Name && s == n; }
+  bool isString() const { return type == ObjType::String; }
+  bool isArray() const { return type == ObjType::Array && a; }
+  bool isDict() const { return (type == ObjType::Dict || type == ObjType::Stream) && d; }
+  bool isStream() const { return type == ObjType::Stream && d; }
+  bool isRef() const { return type == ObjType::Ref; }
+  bool isKeyword(std::string_view k) const { return type == ObjType::Keyword && s == k; }
+  double num(double def = 0) const {
+    return type == ObjType::Int ? static_cast<double>(i) : type == ObjType::Real ? r : def;
+  }
+  int64_t integer(int64_t def = 0) const {
+    return type == ObjType::Int ? i : type == ObjType::Real ? static_cast<int64_t>(r) : def;
+  }
+  size_t size() const { return isArray() ? a->size() : 0; }
+  const Object& at(size_t k) const;          // array element (a null object when out of range)
+  const Object* find(std::string_view key) const;  // dictionary entry (nullptr when missing)
+  const Object& operator[](std::string_view key) const;  // dictionary entry (a null object when missing)
+};
+
+const Object& nullObject();
+
+// Tokenizer and object parser over a byte range. Never throws; stops at the end of the data.
+class Lexer {
+ public:
+  explicit Lexer(std::string_view data, size_t pos = 0) : d_(data), p_(pos) {}
+  size_t pos() const { return p_; }
+  void setPos(size_t p) { p_ = p; }
+  std::string_view data() const { return d_; }
+  void skipSpace();
+  bool atEnd() {
+    skipSpace();
+    return p_ >= d_.size();
+  }
+  // Next token. Delimiters ([ ] << >> { }) and bare words come back as keywords. False at the end of the data.
+  bool token(Object& t);
+  // A complete object: arrays and dictionaries are read recursively; with `refs`, "n g R" is a reference.
+  bool object(Object& o, bool refs = true, int depth = 0);
+
+ private:
+  void readName(Object& t);
+  void readLiteralString(Object& t);
+  void readHexString(Object& t);
+  void readNumberOrKeyword(Object& t);
+  std::string_view d_;
+  size_t p_ = 0;
+};
+
+bool isPdfSpace(unsigned char c);
+bool isPdfDelimiter(unsigned char c);
+
+// Text strings (document information, outlines, ActualText): UTF-16BE with BOM, UTF-8 with BOM or
+// PDFDocEncoding, converted to UTF-8. With `collapse`, control characters and runs of white space become single
+// spaces and the ends are trimmed; without it only control characters other than tab and new line are dropped.
+std::string textToUtf8(std::string_view raw, bool collapse = true);
+char32_t pdfDocEncodingToUnicode(unsigned char c);
+
+// Stream filters. `name` is a filter name (abbreviations accepted), `p` its DecodeParms.
+// Returns false for filters this reader does not decode (image codecs: DCT, JPX, CCITT, JBIG2) and for unknown ones.
+struct FilterParams {
+  int predictor = 1, colors = 1, bpc = 8, columns = 1, earlyChange = 1;
+};
+FilterParams filterParams(const Object& decodeParms);
+bool applyFilter(std::string_view name, const FilterParams& p, std::string_view in, std::string& out, size_t maxOut);
+bool isImageCodecFilter(std::string_view name);
+std::string_view canonicalFilterName(std::string_view name);
+
+constexpr size_t kMaxStreamBytes = size_t(256) * 1024 * 1024;
+
+class File {
+ public:
+  File();
+  ~File();
+  File(const File&) = delete;
+  File& operator=(const File&) = delete;
+
+  // `data` is the whole file and must outlive this object.
+  bool open(std::string_view data, std::string* err);
+  // Metadata only: the first and the last bytes of a file of `fileSize` bytes. Objects outside both read as null.
+  bool openPartial(std::string_view head, std::string_view tail, uint64_t fileSize, std::string* err);
+
+  const Object& trailer() const { return trailer_; }
+  const std::string& version() const { return version_; }
+  bool encrypted() const { return encrypted_; }
+
+  // Indirect object `num` (cached). Null when it does not exist.
+  const Object& get(int num);
+  // Follows references (up to a fixed depth).
+  Object resolve(const Object& o);
+  // Resolved dictionary entry.
+  Object get(const Object& dict, std::string_view key);
+
+  // The stream's bytes after decryption, still encoded with its filters.
+  bool rawStream(const Object& stream, std::string& out);
+  // Decodes all filters. When an image codec filter is reached, decoding stops: `imageFilter` (when given)
+  // receives its canonical name and `out` the data still in that encoding; without `imageFilter` it fails.
+  bool decodeStream(const Object& stream, std::string& out, std::string* imageFilter = nullptr,
+                    size_t maxOut = kMaxStreamBytes);
+  // Decrypts a string that belongs to indirect object `num`/`gen` (no-op for unencrypted files).
+  void decryptString(std::string& s, int num, int gen) const;
+
+  int objectCount() const { return static_cast<int>(xref_.size()); }
+  bool repaired() const { return repaired_; }
+
+ private:
+  struct XrefEntry {
+    uint8_t type = 0;  // 0 free/unknown, 1 at an offset, 2 inside an object stream
+    int gen = 0;
+    uint64_t offset = 0;  // type 1: file offset; type 2: number of the object stream
+    int index = 0;        // type 2: index inside the object stream
+  };
+  struct ObjStream {
+    std::string data;
+    std::vector<std::pair<int, size_t>> offsets;  // object number -> offset in data
+  };
+  struct Crypt;
+
+  bool finishOpen(std::string* err);
+  std::string_view view(uint64_t offset) const;  // data from `offset` to the end of the range holding it
+  bool readXrefChain(uint64_t offset);
+  bool readXrefAt(uint64_t offset, std::vector<uint64_t>& prevs);
+  bool readXrefTable(Lexer& lx, std::vector<uint64_t>& prevs);
+  bool readXrefStream(Lexer& lx, uint64_t base, std::vector<uint64_t>& prevs);
+  void setEntry(int num, const XrefEntry& e);
+  void mergeTrailer(const Object& t);
+  bool loadAt(uint64_t offset, int num, Object& out);
+  bool loadFromObjStream(int streamNum, int index, int num, Object& out);
+  void rebuildXref();
+  bool rootUsable();
+  void decryptObject(Object& o, int num, int gen) const;
+  bool setupDecryption(std::string* err);
+
+  std::string_view data_;     // full file, or the head when partial
+  std::string_view tail_;     // partial mode: the last bytes
+  uint64_t tailOffset_ = 0;   // partial mode: file offset of tail_
+  uint64_t fileSize_ = 0;
+  int64_t headerShift_ = 0;   // bytes before "%PDF" (some writers count offsets from there)
+  bool partial_ = false;
+  bool repaired_ = false;
+  bool encrypted_ = false;
+  bool readingXref_ = false;  // indirect /Length values cannot be resolved yet
+  std::string version_;
+  Object trailer_;
+  std::vector<XrefEntry> xref_;
+  std::unordered_map<int, Object> cache_;
+  std::unordered_map<int, std::unique_ptr<ObjStream>> objStreams_;
+  std::vector<int> loading_;  // object numbers being loaded (reference cycles)
+  std::unique_ptr<Crypt> crypt_;
+};
+
+// ---- Images ------------------------------------------------------------------------------------------------------
+// Pictures whose samples need PDF filters and colour conversion are stored in ImageData::bytes as a small container
+// ("LLPDFIM1" + parameters + still-compressed samples) and decoded only when they are shown.
+
+struct ImageSpec {
+  int width = 0, height = 0, bpc = 8;
+  int comps = 1;                   // components of the colour space (palette: 1)
+  enum Space : uint8_t { Gray, Rgb, Cmyk, Indexed } space = Gray;
+  bool invert = false;             // Decode [1 0 ...]
+  bool stencil = false;            // ImageMask: 1-bit, painted samples are black
+  bool jpeg = false;               // `data` is a JPEG (DCTDecode) file
+  std::vector<std::pair<std::string, FilterParams>> filters;  // filters still to apply to `data`
+  std::string palette;             // Indexed: RGB triplets
+  std::string data;                // encoded samples
+  std::string mask;                // optional soft mask (gray), itself a container
+};
+
+constexpr int64_t kMaxImagePixels = 50000000;  // larger pictures are not shown (RGBA would need 200 MB)
+
+std::string encodeImageContainer(const ImageSpec& spec);
+bool isImageContainer(const unsigned char* data, size_t size);
+bool imageContainerSize(const unsigned char* data, size_t size, int& width, int& height);
+// Decodes to RGBA8 (row 0 = top).
+bool decodeImageContainer(const unsigned char* data, size_t size, std::vector<unsigned char>& rgba, int& width,
+                          int& height);
+
+}  // namespace ll::pdf
+```
+
+## `src/core/PdfCrypt.h`
+
+ASCII, LF line endings, ends with a newline.
+
+```cpp
+// Lanternleaf - PDF standard security handler, decryption only: files that open without a password
+// (an empty user password, as for files that merely restrict printing or copying). RC4 40-128 bit (revisions 2-4),
+// AES-128 (AESV2) and AES-256 (AESV3, revisions 5 and 6). The hash and cipher primitives follow their standards
+// (RFC 1321, FIPS 180-4, FIPS 197).
+#pragma once
+
+#include <functional>
+#include <string>
+#include <string_view>
+
+#include "core/PdfReader.h"
+
+namespace ll::pdf {
+
+class CryptHandler {
+ public:
+  // `encrypt` is the Encrypt dictionary, `id0` the first string of the trailer's ID. False (with a message) when the
+  // file needs a password or uses an unsupported security handler.
+  bool init(const Object& encrypt, const std::string& id0, const std::function<Object(const Object&)>& resolve,
+            std::string* err);
+  void decryptString(std::string& s, int num, int gen) const;
+  void decryptStream(std::string& s, int num, int gen, bool unencryptedKind) const;
+  bool encryptMetadata() const { return encryptMetadata_; }
+
+ private:
+  enum class Method { None, Rc4, Aes128, Aes256 };
+  void decrypt(std::string& s, int num, int gen, Method m) const;
+  std::string key_;
+  Method strings_ = Method::None, streams_ = Method::None;
+  bool encryptMetadata_ = true;
+};
+
+// Primitives (exposed for the unit tests).
+std::string md5(std::string_view data);
+std::string sha256(std::string_view data);
+std::string sha384(std::string_view data);
+std::string sha512(std::string_view data);
+std::string rc4(std::string_view key, std::string_view data);
+// AES in CBC mode without padding; `data` must be a multiple of 16 bytes. Key: 16 or 32 bytes.
+std::string aesCbcDecrypt(std::string_view key, std::string_view iv, std::string_view data);
+std::string aesCbcEncrypt(std::string_view key, std::string_view iv, std::string_view data);
+
+}  // namespace ll::pdf
+```
+
+## `src/core/PdfContent.h`
+
+ASCII, LF line endings, ends with a newline.
+
+```cpp
+// Lanternleaf - PDF page content: the page tree, fonts (encodings, glyph names, ToUnicode maps, widths) and a
+// content stream interpreter that turns a page into positioned characters and placed pictures.
+#pragma once
+
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "core/PdfReader.h"
+
+namespace ll::pdf {
+
+// What reflowing text needs to know about a font.
+struct FontStyle {
+  std::string name;  // BaseFont without a subset prefix ("ABCDEF+")
+  bool bold = false;
+  bool italic = false;
+  bool mono = false;
+};
+
+enum GlyphFlag : uint8_t {
+  kGlyphArtifact = 1,   // inside /Artifact marked content (running heads, page numbers, decoration)
+  kGlyphInvisible = 2,  // text rendering mode 3 or 7 (OCR layers of scanned pages)
+  kGlyphReplaced = 4,   // its text went to the first glyph of an ActualText span (it continues that text)
+};
+
+// One shown character. Page space: points, origin at the top left of the visible page, y down.
+struct Glyph {
+  std::string text;      // UTF-8; empty for glyphs without a Unicode mapping; several characters for ligatures
+  float x = 0, y = 0;    // origin on the baseline
+  float ex = 0, ey = 0;  // end of the advance (x + advance along the baseline)
+  float size = 0;        // font size in page units
+  uint16_t font = 0;     // index into ContentReader::fonts()
+  uint8_t flags = 0;     // GlyphFlag
+};
+
+struct PageImage {
+  Object image;          // the image XObject (a stream)
+  float x0 = 0, y0 = 0, x1 = 0, y1 = 0;  // bounding box in page space
+  bool artifact = false;    // inside /Artifact marked content (decoration; text may still wrap around it)
+};
+
+struct PageContent {
+  float width = 0, height = 0;  // visible page size (crop box, rotated)
+  std::vector<Glyph> glyphs;    // content order
+  std::vector<PageImage> images;
+};
+
+class ContentReader {
+ public:
+  explicit ContentReader(File& file);
+  ~ContentReader();
+  ContentReader(const ContentReader&) = delete;
+  ContentReader& operator=(const ContentReader&) = delete;
+
+  int pageCount();
+  // Index of the page whose dictionary is object `objNum`, or -1.
+  int pageIndexOf(int objNum);
+  // Visible size and rotation of page `index` without interpreting it.
+  bool pageBox(int index, float& width, float& height);
+  // Converts a point in the default user space of page `index` (as in destinations) to page space.
+  bool userToPage(int index, double x, double y, float& px, float& py);
+  // Interprets page `index`. `withImages` records the pictures that are drawn.
+  bool readPage(int index, PageContent& out, bool withImages = true);
+  const std::vector<FontStyle>& fonts() const;
+
+  struct Impl;
+
+ private:
+  std::unique_ptr<Impl> impl_;
+};
+
+// Unicode for an Adobe glyph name ("A", "quoteright", "uni0416", "f_i", "a.sc"); empty when unknown.
+std::string glyphNameToUtf8(std::string_view name);
+
+}  // namespace ll::pdf
+```
+
+## `src/core/PdfParser.h`
+
+ASCII, LF line endings, ends with a newline.
+
+```cpp
+// Lanternleaf - PDF books as reflowable text: the characters of every page are put back into lines, paragraphs and
+// headings (running heads and page numbers removed, hyphenated line ends joined), pictures are kept in reading order,
+// the outline becomes the table of contents and the first page's picture the cover.
+#pragma once
+
+#include <cstdint>
+#include <string>
+#include <string_view>
+
+#include "core/Document.h"
+
+namespace ll {
+
+struct PdfOptions {
+  bool loadImages = true;
+};
+
+// True when `head` (the first bytes of a file) starts a PDF file ("%PDF-" within the first KiB).
+bool looksLikePdf(std::string_view head);
+
+// Parses a complete book. `fileStem` supplies title and author when the file has none. Never throws; returns false
+// (with a message) when the file cannot be read or holds neither text nor pictures.
+bool parsePdf(std::string_view raw, Document& doc, std::string_view fileStem, std::string* error = nullptr,
+              const PdfOptions& opt = {});
+
+// Title, authors and language from the document information dictionary (or XMP metadata). `head` and `tail` are the
+// first and last bytes of a file of `fileSize` bytes (both may be the whole file). False when they are not enough.
+bool parsePdfMeta(std::string_view head, std::string_view tail, uint64_t fileSize, BookMeta& meta);
+
+// Metadata and the readable text (for full-text search): one paragraph per line.
+void pdfExtractText(std::string_view raw, std::string& text, BookMeta* meta, std::string_view fileStem);
+
+}  // namespace ll
+```
+
 ## `src/core/BookLoader.h`
 
 ASCII, LF line endings, ends with a newline.
@@ -497,7 +896,7 @@ ASCII, LF line endings, ends with a newline.
 
 namespace ll {
 
-enum class BookFormat : uint8_t { Unknown, Fb2, Txt, Fb2Zip, TxtZip, Zip };
+enum class BookFormat : uint8_t { Unknown, Fb2, Txt, Fb2Zip, TxtZip, Zip, Pdf };
 
 // UTF-8 <-> std::filesystem::path (Windows paths are wide; never go through the ANSI code page).
 std::filesystem::path pathFromUtf8(std::string_view utf8);
@@ -505,14 +904,15 @@ std::string pathToUtf8(const std::filesystem::path& p);
 
 BookFormat formatFromName(std::string_view fileName);
 bool isSupportedBookName(std::string_view fileName);
-// File name without directories and without .fb2/.txt/.zip extensions.
+// File name without directories and without .fb2/.txt/.pdf/.zip extensions.
 std::string fileStemOf(std::string_view path);
 std::string fileNameOf(std::string_view path);
 
 bool readFile(const std::string& path, std::string& out, size_t maxBytes = SIZE_MAX, std::string* err = nullptr);
 
 // Raw (still encoded) book content. Zip archives (also mis-named ones) are unpacked: the first .fb2
-// entry, otherwise the largest .txt entry. `contentFormat` is Fb2 or Txt on success.
+// entry, otherwise the largest .txt entry. A PDF is recognised by its "%PDF-" header, whatever its name.
+// `contentFormat` is Fb2, Txt or Pdf on success.
 bool readBookRaw(const std::string& path, std::string& raw, BookFormat& contentFormat, std::string* err,
                  size_t maxBytes = SIZE_MAX, bool* zipped = nullptr);
 

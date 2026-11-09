@@ -720,7 +720,7 @@ Each line is drawn with `r2d_.drawText(shaper, text, style, x, y, size, colour)`
 | Line | Text | Shaper, style | Size | Colour | Baseline |
 |---|---|---|---|---|---|
 | title | `Lanternleaf` | `bookShaper_` (the current typeface), style 1 (italic) | `round(54 s)` | `theme_.text` | `h × 0.36` |
-| tagline | `a quiet reader for FB2 and TXT books` | `uiShaper_` (PT Sans), style 1 (italic) | `round(18 s)` | `theme_.secondary` | previous + `round(40 s)` |
+| tagline | `a quiet reader for FB2, TXT and PDF books` | `uiShaper_` (PT Sans), style 1 (italic) | `round(18 s)` | `theme_.secondary` | previous + `round(40 s)` |
 | hints (3 lines) | below | `uiShaper_`, style 0 | `round(16 s)` | `theme_.text` | first: previous + `round(56 s)`; each next + `round(30 s)` |
 
 Desktop hints (two spaces after each key name; eight spaces between `books` and `F1`):
@@ -735,7 +735,7 @@ Touch hints (`touchFirst_`):
 
 ```
 Tap the middle of the screen for the menu
-Menu > Find books: search this device for FB2 and TXT
+Menu > Find books: search this device for FB2, TXT, PDF
 Menu > Open a book: browse your folders
 ```
 
@@ -1331,7 +1331,7 @@ The events go through the normal path (`SDL_AppEvent` → `handleEvent` → ImGu
 | `minimum window size %dx%d (10%% of the display, %dx%d)` | `createWindow` and display changes (desktop, not screenshot), when the minimum changes |
 | `English hyphenation patterns not found` | `loadHyphenation`, English patterns missing or empty |
 | `Russian hyphenation patterns not found` | the same for Russian |
-| `Lanternleaf %s, OpenGL %s` | end of the set-up: version (e.g. `0.6.0`) and the `GL_VERSION` string (`unknown` if none) |
+| `Lanternleaf %s, OpenGL %s` | end of the set-up: version (e.g. `0.7.0`) and the `GL_VERSION` string (`unknown` if none) |
 | `opened %s: %s, %s, %d blocks, %llu chars, parse %.0f ms, first page %.0f ms` | every book opened: path, format (`FB2`, `TXT`, `FB2 (zip)` …), encoding, block count, code points, parse time, time to the first page |
 | `%s` | `showError`, e.g. `Could not open "book.fb2": <reason>` |
 | `page count: %d pages, %.0f ms of work` | the background page count finished |
@@ -1340,7 +1340,7 @@ The events go through the normal path (`SDL_AppEvent` → `handleEvent` → ImGu
 | `screenshot %s: %s` | `written` or `FAILED`, then the PNG path |
 | `instant page turns: %d shown from the pages prepared ahead, %d drawn on the spot` | `shutdown`, if at least one instant turn happened |
 
-(AppUi.cpp adds `file access granted`.) A typical desktop start therefore begins with `minimum window size …`, then `Lanternleaf 0.6.0, OpenGL …`, then `opened …`.
+(AppUi.cpp adds `file access granted`.) A typical desktop start therefore begins with `minimum window size …`, then `Lanternleaf 0.7.0, OpenGL …`, then `opened …`.
 
 ## 25. Contract with AppUi.cpp and FileBrowser.cpp
 
@@ -1357,7 +1357,7 @@ For reference, the behaviour of `updateBars` that this file relies on (specified
 Start-up, window, files
 - [ ] A first start on the desktop (no settings file) opens a 1180 × 820 window titled `Lanternleaf` with the Day theme, one page, Instant page turns, text size 21 and the library panel on its Find tab; with a recent list it opens the Recent tab instead when no book can be opened.
 - [ ] `--settings-dir D` puts `settings.json`, `library-cache.json`, `imgui.ini` and `lanternleaf.log` in `D` (created if missing); without it SDL's preference folder for `Lanternleaf` is used.
-- [ ] `lanternleaf.log` is emptied at every start; on the desktop it starts with `minimum window size WxH (10% of the display, WxH)` and then `Lanternleaf 0.6.0, OpenGL …`.
+- [ ] `lanternleaf.log` is emptied at every start; on the desktop it starts with `minimum window size WxH (10% of the display, WxH)` and then `Lanternleaf 0.7.0, OpenGL …`.
 - [ ] The window cannot be made smaller than 10 % of its monitor (rounded, per side); moving it to another monitor re-applies the rule (a new log line only when the minimum changes).
 - [ ] A saved position is used only if the point 60 units right and 20 units below the window's top-left corner is on some display's usable area; a maximized window starts maximized and keeps its earlier restored size and position in the settings.
 - [ ] Without the `assets` folder the program shows `The bundled fonts could not be loaded. Is the 'assets' folder next to the program?` and exits.
@@ -1397,7 +1397,7 @@ Rendering
 - [ ] Body text uses the theme's text colour and gamma; footnote markers and in-book links the accent colour; web links are blue (`#1A5FB4` on Day/Sepia, `#8AB4F8` on Dusk/Night) with one continuous underline per line.
 - [ ] Pictures keep their own colours in every theme; pictures larger than the GPU's maximum texture size are reduced by an integer box filter.
 - [ ] A find hit is shown as a translucent accent band (alpha 0.25) behind the matched words, 2 s px wider on each side, one band per line.
-- [ ] Without a book the page shows `Lanternleaf` (italic, 54 s px), the tagline `a quiet reader for FB2 and TXT books` and three hint lines (desktop or touch texts).
+- [ ] Without a book the page shows `Lanternleaf` (italic, 54 s px), the tagline `a quiet reader for FB2, TXT and PDF books` and three hint lines (desktop or touch texts).
 
 Page turns
 - [ ] Curl, slide and fade take `turnSeconds` (default 0.5 s); a new key press during a turn completes it at once and starts the next.

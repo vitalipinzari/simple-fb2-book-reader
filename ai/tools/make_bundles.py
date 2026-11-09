@@ -11,8 +11,10 @@ Without an argument it works on the repository that contains this script. It wri
 and warns about repository files that no bundle, no spec and no list below accounts for, so new files are not
 forgotten when the prompts are refreshed for a later version. Standard library only (Python 3.8+).
 
-The regenerated application is published under the MIT License. LICENSE_EDITS lists the only changes made to the
-files of the original: the bundles carry the edited text and the checksums are those of the edited files.
+The regenerated application is published under the MIT License. Since 0.7.0 the repository itself is the MIT
+edition, so LICENSE_EDITS and NEW_FILES are empty; they remain for a source tree whose files must be edited (or
+added) before they are published: the bundles then carry the edited text and the checksums are those of the
+edited files.
 """
 import hashlib
 import re
@@ -46,28 +48,27 @@ SOFTWARE.
 """
 
 # (file, old text, new text): every occurrence is replaced; each edit must apply at least once.
-LICENSE_EDITS = [
-    ("res/lanternleaf.rc.in", "All rights reserved.", "MIT License."),
-    ("README.md", "All rights reserved.", "Released under the MIT License (see [LICENSE](LICENSE))."),
-]
-# Files that exist only in the MIT edition of the repository.
-NEW_FILES = {"LICENSE": MIT_LICENSE}
+LICENSE_EDITS = []
+# Files that exist only in the MIT edition of the repository (the repository has its own LICENSE since 0.7.0;
+# it must equal MIT_LICENSE, which main() checks).
+NEW_FILES = {}
 
 BUNDLES = [
-    ("01-build-system.md", "Build system, version, licence and build scripts",
+    ("01-build-system.md", "Build system, version, licence, build scripts and installer",
      "The root of the repository: the version file, the MIT licence, CMake (also used by the Android build through "
-     "Gradle), the vcpkg manifest, the CMake helper modules, the Windows resource and version templates and the two "
-     "PowerShell build scripts.",
+     "Gradle), the vcpkg manifest, the CMake helper modules, the Windows resource and version templates, the three "
+     "PowerShell build scripts, and the WiX source of the Windows installer with its licence page.",
      ["VERSION", "LICENSE", ".gitignore", "CMakeLists.txt", "CMakePresets.json", "vcpkg.json",
       "cmake/HarfBuzzAmalgamated.cmake", "cmake/StageRelease.cmake", "res/lanternleaf.rc.in", "src/app/Version.h.in",
-      "build.ps1", "build-android.ps1"]),
+      "build.ps1", "build-android.ps1", "build-msi.ps1", "installer/Lanternleaf.wxs", "installer/License.rtf"]),
     ("02-source-interfaces.md", "Source: every header, the entry point and the platform, theme and settings code",
      "Every header of the code base (the interfaces the specifications in ai/spec implement), the entry point, and "
      "the three .cpp files that are data or operating-system glue rather than algorithms: the colour themes, the "
-     "settings file format and the platform layer. The other .cpp files are specified in ai/spec/03-10.",
+     "settings file format and the platform layer. The other .cpp files are specified in ai/spec/03-10 and 15.",
      ["src/main.cpp",
       "src/core/Unicode.h", "src/core/Encoding.h", "src/core/XmlReader.h", "src/core/Document.h",
       "src/core/FileUtil.h", "src/core/ImageCodec.h", "src/core/Fb2Parser.h", "src/core/TxtParser.h",
+      "src/core/PdfReader.h", "src/core/PdfCrypt.h", "src/core/PdfContent.h", "src/core/PdfParser.h",
       "src/core/BookLoader.h", "src/core/Hyphenator.h", "src/core/LineBreaker.h", "src/core/LibrarySearch.h",
       "src/text/FontLibrary.h", "src/text/Shaper.h", "src/text/BookLayout.h",
       "src/render/Gl.h", "src/render/GlCommon.h", "src/render/GlyphAtlas.h", "src/render/Renderer2D.h",
@@ -115,6 +116,8 @@ SPECIFIED = {
     "src/render/GlCommon.cpp": "08", "src/render/GlyphAtlas.cpp": "08", "src/render/Renderer2D.cpp": "08",
     "src/render/PageTurn.cpp": "08", "src/app/App.cpp": "09", "src/app/AppUi.cpp": "10",
     "src/app/FileBrowser.cpp": "10",
+    "src/core/PdfReader.cpp": "15", "src/core/PdfCrypt.cpp": "15", "src/core/PdfContent.cpp": "15",
+    "src/core/PdfParser.cpp": "15",
 }
 # Accounted for elsewhere (generated, downloaded, secret or machine-specific).
 OTHER = [r"^android/app/src/main/java/org/libsdl/app/.*\.java$", r"^android/gradlew(\.bat)?$",
@@ -227,6 +230,8 @@ def repository_files():
 
 
 def main():
+    if "LICENSE" not in NEW_FILES and (ROOT / "LICENSE").read_text(encoding="utf-8") != MIT_LICENSE:
+        sys.exit("error: LICENSE is not the MIT licence text of MIT_LICENSE")
     OUT.mkdir(parents=True, exist_ok=True)
     sums = []
     bundled = set()

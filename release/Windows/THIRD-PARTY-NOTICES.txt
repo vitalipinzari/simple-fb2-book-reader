@@ -1,4 +1,4 @@
-Lanternleaf 0.6.0 - third-party notices
+Lanternleaf 0.7.0 - third-party notices
 
 Fonts: PT Serif and PT Sans by ParaType, SIL Open Font License (assets/fonts/OFL-*.txt).
 Hyphenation patterns: hyph-utf8 project (assets/hyphenation/README.md).

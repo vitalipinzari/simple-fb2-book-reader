@@ -6,13 +6,13 @@ Reproduce every file below **byte for byte** at the path in its heading. The fen
 
 | File | Bytes | SHA-256 |
 |---|---:|---|
-| `README.md` | 21199 | `2fc113eb313ba84c…` |
+| `README.md` | 23223 | `b8a04f4208753cb5…` |
 | `PROMPT.md` | 1796 | `c02071ce80a8f273…` |
 | `CHANGELIST.md` | 2596 | `519a47fe61899f1c…` |
 | `bugs/prompt.md` | 648 | `45586d612cd635bb…` |
 | `bugs/report.md` | 964 | `07f3c687257f1e62…` |
 | `features/prompt.md` | 644 | `d36d5c139fc6575f…` |
-| `features/features.md` | 916 | `6579cc92e3b192a6…` |
+| `features/features.md` | 2685 | `8699dd93d0441fcd…` |
 | `assets/hyphenation/README.md` | 868 | `a928eb8c68d9ac3b…` |
 | `assets/licenses/THIRD-PARTY-NOTICES.txt` | 27755 | `b82c1746735fb68e…` |
 | `tools/make_icon.py` | 6426 | `5544ee73ceb98367…` |
@@ -24,7 +24,7 @@ UTF-8 without BOM, CRLF line endings, ends with a newline.
 ````markdown
 # Lanternleaf
 
-A quiet book reader for **FB2** and **TXT**, drawn entirely on the GPU. It reflows text with TeX-quality line
+A quiet book reader for **FB2**, **TXT** and **PDF**, drawn entirely on the GPU. It reflows text with TeX-quality line
 breaking and hyphenation for English and Russian, turns pages with a 3D page curl, has science-based night
 themes, and can dig books out of an unsorted *Downloads* folder by file name, title, author or a phrase from
 the text.
@@ -32,7 +32,7 @@ the text.
 It runs on **Windows 11 x64** and **Android** (phones, tablets, Chromebooks) from one C++20 code base:
 SDL3, a portable core, and shaders written for both OpenGL 4.1 core and OpenGL ES 3.0.
 
-Version 0.6.0 · © 2026 Vitali Pinzari. Released under the MIT License (see [LICENSE](LICENSE)).
+Version 0.7.0 · © 2026 Vitali Pinzari. Released under the MIT License (see [LICENSE](LICENSE)).
 
 | Day, two pages | Night amber | 3D page curl | Two-page turn |
 |---|---|---|---|
@@ -71,7 +71,7 @@ Version 0.6.0 · © 2026 Vitali Pinzari. Released under the MIT License (see [LI
   the page is laid out between them, so they never cover the text; hidden, the text fills the whole screen.
 - **Panels** (contents, settings, library, help ...) open one at a time in the top left corner of the page and
   cover half of it: the left half on a wide screen, the top half on a tall one.
-- **Two formats:**
+- **Three formats:**
   - **FB2:** sections, titles, epigraphs, poems and stanzas, citations, subtitles, emphasis, strong,
     strikethrough, sup/sub, footnotes (click a note number to see it in a pop-up), cover and embedded
     pictures. The parser is tolerant of broken files. `.fb2.zip` archives (common in Russian libraries) open
@@ -79,6 +79,13 @@ Version 0.6.0 · © 2026 Vitali Pinzari. Released under the MIT License (see [LI
   - **TXT:** paragraphs are rebuilt from hard-wrapped, indented or blank-line separated text, and chapter
     headings (Chapter, Глава, Часть, roman numerals…) go into the contents. `--` and spaced hyphens become
     em dashes, and Project Gutenberg boilerplate and `_italic_` markup are handled.
+  - **PDF:** read by Lanternleaf's own PDF reader (no PDF library is used). The text of every page is put back
+    into reflowable paragraphs, so a PDF gets the same fonts, themes, zoom and hyphenation as any other book:
+    running heads, page numbers and decorations are removed, hyphenated line ends are joined, and headings,
+    lists, tables (rows with `|` between the cells), code, footnotes and drop caps are recognised. Pictures stay in
+    reading order, two-column pages are read column by column, the PDF outline becomes the contents and the first
+    page's picture the cover. Damaged files (the cross-reference table is rebuilt) and encrypted files that open
+    without a password (RC4, AES-128, AES-256) open too.
 - **Zoom with reflow.** Ctrl + mouse wheel, Ctrl +/-, or a two-finger pinch. Text reflows around the reading
   position: the line you were reading stays on screen, and the same applies to window resizing.
 - **Hyphenation and line breaking.** Lines are broken with the Knuth–Plass "total fit" algorithm (TeX) and
@@ -106,7 +113,7 @@ Version 0.6.0 · © 2026 Vitali Pinzari. Released under the MIT License (see [LI
   streaming in:
   - **File name:** includes transliteration, so *Толстой*, *Tolstoy* and *Tolstoj* all find
     `Tolstoy_Voyna-i-mir.fb2.zip`.
-  - **Title, author, series:** read from FB2 metadata and cached, so repeated searches are instant.
+  - **Title, author, series:** read from FB2 and PDF metadata and cached, so repeated searches are instant.
   - **Text inside books:** finds a whole phrase, ignoring case, *ё/е* and typographic quotes.
   - **Empty query:** lists every book found, which is useful for sorting out a Downloads mess.
 
@@ -160,6 +167,13 @@ appears in:
 
 Bump it for every release. Earlier versions stay in the release folders next to the new one.
 
+**Windows installer.** `./build-msi.ps1` packages `release\Windows` into
+`release\Installer\Lanternleaf-<version>-x64.msi` with the WiX Toolset (downloaded into `build\tools` on the
+first run; needs the .NET SDK). It installs per machine into `Program Files\Lanternleaf`, adds a Start menu
+shortcut, makes `.fb2` open in Lanternleaf and adds it to *Open with* for `.txt`, `.pdf` and `.zip`. A newer MSI
+replaces the installed version; reader settings in `%APPDATA%\Lanternleaf` are kept on uninstall. The source
+is in `installer/`.
+
 The Windows folder is self-contained. Libraries are linked statically and the Visual C++ runtime DLLs are
 placed next to the exe, so you can copy the folder to any 64-bit Windows 10/11 PC and run it. If the staged
 app is running while you build, the folder is left unchanged and the build prints a warning; close the app and
@@ -176,7 +190,7 @@ backends), glad, miniz, stb, nlohmann-json.
 ## Android
 
 The same C++ code runs on Android 9+ (phones, tablets, Chromebooks): OpenGL ES 3.0 renderer, SDL3, and the
-same layout, hyphenation, FB2/TXT parsers and library search.
+same layout, hyphenation, FB2/TXT/PDF readers and library search.
 
 ```powershell
 ./build-android.ps1                 # -> release\Android\Lanternleaf-<version>.apk (arm64-v8a + x86_64, signed)
@@ -207,7 +221,7 @@ What is different on a phone:
 | Panels | open in the top left half of the page over the dimmed page and stay in place; tap the page beside them (or Back) to return to reading |
 | Back button | closes the open panel; on the page it leaves the app (the position is saved) |
 | Finding books | **Find books** searches Download, Documents, Books and Telegram folders, or the whole device and SD cards. Android 11+ asks once for *All files access*, needed to read books outside the app's own folder |
-| Opening books | **Open a book** browses folders; FB2/TXT/ZIP files can also be opened *with Lanternleaf* from file managers and messengers |
+| Opening books | **Open a book** browses folders; FB2/TXT/PDF/ZIP files can also be opened *with Lanternleaf* from file managers and messengers |
 | Screen | immersive full screen and kept on while reading (both in Settings); text and buttons stay clear of the camera notch; turned sideways, two pages side by side |
 | Keyboard | search fields get no auto-capitalisation or autocorrect flags; the page number field gets a number pad |
 
@@ -260,13 +274,13 @@ Settings, reading positions, the search cache and a log file are stored in `%APP
 ## Architecture
 
 ```
-src/core      portable C++20, no SDL/GL: document model, FB2 and TXT parsers, encodings, zip,
+src/core      portable C++20, no SDL/GL: document model, FB2, TXT and PDF readers, encodings, zip,
               Liang hyphenation, Knuth–Plass line breaking, library search and metadata cache
 src/text      FreeType + HarfBuzz: fonts, shaping cache, paragraph and page layout (BookLayout)
 src/render    OpenGL 4.1 core / ES 3.0: glyph atlas, batched 2D renderer, 3D page turn
 src/app       SDL3 application (main callbacks), settings, themes, Dear ImGui panels
 src/platform  OS specifics: folders, drives, system fonts, cloud placeholders
-tests         unit tests for the core and the layout engine (751 checks)
+tests         unit tests for the core and the layout engine (840 checks)
 assets        PT Serif / PT Sans (OFL) and the hyphenation patterns
 tools         make_icon.py (generates the application icon)
 cmake         StageRelease.cmake (copies each Release build to release/<Platform>)
@@ -314,6 +328,10 @@ Key design decisions:
   - The tolerant XML reader
   - FB2: structure, styles, footnotes, cover, broken markup
   - TXT paragraph heuristics and typography
+  - PDF: the lexer, the stream filters (Flate, LZW, ASCIIHex, ASCII85, RunLength, PNG predictors),
+    cross-reference tables and streams, object streams, repairing damaged files, composite fonts with
+    ToUnicode maps, pictures, the security handler (MD5, SHA-2, RC4 and AES checked against their standard
+    test vectors), and the paragraphs, headings, hyphenated line ends and outline of a generated book
   - Hyphenation
   - Line breaking
   - Transliteration matching
@@ -346,7 +364,10 @@ per frame: move, press, release. It is used to check that a click outside a menu
 
 - Right-to-left and vertical scripts are shaped but not laid out right to left.
 - Pictures placed inside a running paragraph are skipped; block pictures and the cover are shown.
-- FB2 tables are simplified to rows with `|` separators.
+- FB2 and PDF tables are simplified to rows with `|` separators.
+- PDF pages are reflowed, not shown as printed. Drawings made of vector graphics are not shown (their
+  pictures and text are), and scanned pages need a text layer or JPEG pictures: JPEG 2000, JBIG2 and CCITT
+  fax pictures are skipped. Files that need a password to open are not supported.
 - There is no text selection, copying, bookmarks or annotations yet.
 
 ## Credits and licences
@@ -472,7 +493,7 @@ short summary of a implemented feature with steps/way of implementation should b
 
 ## `features/features.md`
 
-ASCII, CRLF line endings except LF after line 11, ends with a newline.
+ASCII, CRLF line endings, ends with a newline.
 
 ```markdown
 # structure
@@ -486,6 +507,24 @@ Any features with verified/confirmed status should be removed on next iteration 
 Removed features and their implementation description should be added as items in CHANGELIST.md - short summary of a feature and implementation is preffered option there. 
 
 ## features
+
+### PDF books
+Description: Add PDF support without depending on a PDF reader library: a minimal implementation of the PDF standard
+that reads and shows at least the books in the `test-books` folder (Alex Xu - System Design Interview, Second Edition;
+Bhardwaj R. - System Design with AI Interview Guide - 2026; Sellers M. - Advanced Game Design. A Systems Approach - 2017).
+Implementation: four new core modules, no new dependencies (miniz inflates, stb_image decodes JPEG as before).
+`PdfReader` reads the file structure: objects, cross-reference tables and streams, object streams, the stream filters
+(Flate, LZW, ASCIIHex, ASCII85, RunLength, PNG/TIFF predictors) and rebuilds a damaged cross-reference table by
+scanning. `PdfCrypt` is the standard security handler for files that open without a password (RC4, AES-128,
+AES-256). `PdfContent` walks the page tree, loads fonts (standard encodings, Differences, glyph names, ToUnicode
+maps, composite fonts, widths) and interprets content streams into positioned characters and placed pictures,
+skipping /Artifact content (running heads, page numbers) and applying ActualText. `PdfParser` turns the pages into a
+reflowable book: lines, columns, running heads and page numbers removed, paragraphs joined across lines and pages,
+hyphenated line ends joined, headings, lists, tables, code, footnotes and drop caps recognised, pictures in reading
+order (still compressed in memory, decoded when shown), the outline as the contents and the first page's picture as
+the cover. PDF files open from the Open dialog, drag and drop, the file browser, Find books (title and author from the
+PDF metadata, text search inside PDFs), Android "Open with" and the installer's "Open with".
+Status: implemented (0.7.0)
 ```
 
 ## `assets/hyphenation/README.md`

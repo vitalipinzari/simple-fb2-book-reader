@@ -1,30 +1,33 @@
-# Build system, version, licence and build scripts
+# Build system, version, licence, build scripts and installer
 
-The root of the repository: the version file, the MIT licence, CMake (also used by the Android build through Gradle), the vcpkg manifest, the CMake helper modules, the Windows resource and version templates and the two PowerShell build scripts.
+The root of the repository: the version file, the MIT licence, CMake (also used by the Android build through Gradle), the vcpkg manifest, the CMake helper modules, the Windows resource and version templates, the three PowerShell build scripts, and the WiX source of the Windows installer with its licence page.
 
 Reproduce every file below **byte for byte** at the path in its heading. The fenced block holds the complete content (the fences are not part of the file); the line under each heading gives what a block cannot show: encoding, line endings and whether the file ends with a newline. `ai/files/checksums.sha256` has the SHA-256 of each file for checking.
 
 | File | Bytes | SHA-256 |
 |---|---:|---|
-| `VERSION` | 5 | `29ef1be9a3a40608…` |
+| `VERSION` | 5 | `b0cb276cde517779…` |
 | `LICENSE` | 1071 | `449ef47f14ac81c0…` |
 | `.gitignore` | 321 | `cbf9330a7b5aa718…` |
-| `CMakeLists.txt` | 10641 | `dcea65ce59cac728…` |
+| `CMakeLists.txt` | 10749 | `133166a6bf5a3bd5…` |
 | `CMakePresets.json` | 1374 | `5d1e32518da2127f…` |
 | `vcpkg.json` | 744 | `f2efeaec2768fa68…` |
 | `cmake/HarfBuzzAmalgamated.cmake` | 1947 | `b691fb67ba525d75…` |
 | `cmake/StageRelease.cmake` | 1836 | `f7fda02e96438df8…` |
-| `res/lanternleaf.rc.in` | 1072 | `d6e2c3abf1f128eb…` |
+| `res/lanternleaf.rc.in` | 1076 | `51e0434ed75b7a39…` |
 | `src/app/Version.h.in` | 453 | `abb5b9157bbb3323…` |
 | `build.ps1` | 2676 | `33146a3b9c52372f…` |
 | `build-android.ps1` | 4275 | `83cb53e6f17bd0b7…` |
+| `build-msi.ps1` | 2694 | `421d93c4d9b3e9c1…` |
+| `installer/Lanternleaf.wxs` | 5337 | `34e3498eeacc2856…` |
+| `installer/License.rtf` | 1491 | `3bc2aae819f11a94…` |
 
 ## `VERSION`
 
 ASCII, no newline at the end.
 
 ```text
-0.6.0
+0.7.0
 ```
 
 ## `LICENSE`
@@ -130,7 +133,7 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_
 
 project(Lanternleaf
   VERSION ${LL_VERSION}
-  DESCRIPTION "Lanternleaf - a GPU (OpenGL) rendered FB2/TXT book reader"
+  DESCRIPTION "Lanternleaf - a GPU (OpenGL) rendered FB2/TXT/PDF book reader"
   LANGUAGES C CXX)
 
 set(LL_DEVELOPER "Vitali Pinzari")
@@ -160,7 +163,7 @@ find_package(nlohmann_json CONFIG REQUIRED)
 find_package(Stb REQUIRED)
 
 # ---------------------------------------------------------------------------------------------
-# ll_core: portable book model, FB2/TXT parsing, encodings, hyphenation, line breaking, search.
+# ll_core: portable book model, FB2/TXT/PDF parsing, encodings, hyphenation, line breaking, search.
 # No SDL and no OpenGL here, so it can be reused unchanged by the Android port.
 # ---------------------------------------------------------------------------------------------
 add_library(ll_core STATIC
@@ -171,6 +174,10 @@ add_library(ll_core STATIC
   src/core/ImageCodec.cpp
   src/core/Fb2Parser.cpp
   src/core/TxtParser.cpp
+  src/core/PdfReader.cpp
+  src/core/PdfCrypt.cpp
+  src/core/PdfContent.cpp
+  src/core/PdfParser.cpp
   src/core/BookLoader.cpp
   src/core/FileUtil.cpp
   src/core/Hyphenator.cpp
@@ -525,7 +532,7 @@ BEGIN
     BLOCK "040904b0"
     BEGIN
       VALUE "CompanyName", "@LL_DEVELOPER@"
-      VALUE "FileDescription", "Lanternleaf - FB2/TXT book reader"
+      VALUE "FileDescription", "Lanternleaf - FB2/TXT/PDF book reader"
       VALUE "FileVersion", "@PROJECT_VERSION@"
       VALUE "InternalName", "Lanternleaf"
       VALUE "LegalCopyright", "Copyright (C) @LL_COPYRIGHT_YEAR@ @LL_DEVELOPER@. MIT License."
@@ -721,5 +728,200 @@ if ($Install -or $Run) {
 }
 if ($Run) {
   Invoke-Tool "adb start" { & $adb shell am start -n app.lanternleaf.reader/.LanternleafActivity }
+}
+```
+
+## `build-msi.ps1`
+
+ASCII, LF line endings, ends with a newline.
+
+```powershell
+<#
+.SYNOPSIS
+  Packages the staged Windows release (release\Windows) into an MSI installer with the WiX Toolset.
+
+.DESCRIPTION
+  Run ./build.ps1 first so release\Windows holds the current build. The first run downloads WiX 6 and its UI
+  extension from NuGet into build\tools (ignored by git); later runs reuse them.
+  Output: release\Installer\Lanternleaf-<version>-x64.msi
+
+.EXAMPLE
+  ./build-msi.ps1
+#>
+$ErrorActionPreference = "Stop"
+Set-Location $PSScriptRoot
+
+$wixVersion = "6.0.2"
+
+function Invoke-Tool([string]$What, [scriptblock]$Command) {
+  $saved = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try { & $Command } finally { $ErrorActionPreference = $saved }
+  if ($LASTEXITCODE -ne 0) { throw "$What failed (exit code $LASTEXITCODE)." }
+}
+
+$version = (Get-Content (Join-Path $PSScriptRoot "VERSION") -Raw).Trim()
+$releaseDir = Join-Path $PSScriptRoot "release\Windows"
+$exeName = "Lanternleaf-$version.exe"
+if (-not (Test-Path (Join-Path $releaseDir $exeName))) {
+  throw "$releaseDir\$exeName not found - run ./build.ps1 first."
+}
+
+# WiX CLI and UI extension, installed locally under build\tools
+$toolsDir = Join-Path $PSScriptRoot "build\tools"
+$wix = Join-Path $toolsDir "wix\wix.exe"
+if (-not (Test-Path $wix)) {
+  if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) { throw "The .NET SDK (dotnet) is needed to install WiX." }
+  Invoke-Tool "Installing WiX" { dotnet tool install wix --version $wixVersion --tool-path (Join-Path $toolsDir "wix") }
+}
+$uiExt = Join-Path $toolsDir ".wix\extensions\WixToolset.UI.wixext\$wixVersion\wixext6\WixToolset.UI.wixext.dll"
+if (-not (Test-Path $uiExt)) {
+  Push-Location $toolsDir
+  try { Invoke-Tool "Installing the WiX UI extension" { & $wix extension add "WixToolset.UI.wixext/$wixVersion" } }
+  finally { Pop-Location }
+}
+
+$outDir = Join-Path $PSScriptRoot "release\Installer"
+New-Item -ItemType Directory -Force $outDir | Out-Null
+$msi = Join-Path $outDir "Lanternleaf-$version-x64.msi"
+
+$installerDir = Join-Path $PSScriptRoot "installer"
+Push-Location $installerDir
+try {
+  Invoke-Tool "MSI build" {
+    & $wix build "Lanternleaf.wxs" -arch x64 -ext $uiExt `
+      -d "Version=$version" -d "ReleaseDir=$releaseDir" -d "ExeName=$exeName" `
+      -intermediatefolder (Join-Path $PSScriptRoot "build\msi") -o $msi
+  }
+} finally { Pop-Location }
+
+Remove-Item (Join-Path $outDir "*.wixpdb") -ErrorAction SilentlyContinue
+
+# Windows Installer consistency checks (ICE). ICE60 is skipped: it flags the bundled .ttf fonts, which are
+# private files read by the app, not system fonts installed into C:\Windows\Fonts.
+Invoke-Tool "MSI validation" { & $wix msi validate $msi -sice ICE60 }
+Write-Host "Installer: $msi"
+```
+
+## `installer/Lanternleaf.wxs`
+
+ASCII, CRLF line endings, ends with a newline.
+
+```text
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Windows installer (MSI) for Lanternleaf, built from the staged release\Windows folder by build-msi.ps1.
+
+  Preprocessor variables (passed by build-msi.ps1):
+    Version     product version, from the VERSION file (e.g. 0.6.0)
+    ReleaseDir  absolute path of release\Windows
+    ExeName     file name of the staged program (e.g. Lanternleaf-0.6.0.exe)
+
+  The program is installed as "Lanternleaf.exe" so that shortcuts and file associations keep the same path
+  across upgrades. UpgradeCode must never change: it is what lets a newer MSI replace an older one.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+
+  <Package Name="Lanternleaf"
+           Manufacturer="Vitali Pinzari"
+           Version="$(var.Version)"
+           UpgradeCode="bf8bade1-142d-4d22-91f4-658f940f8a21"
+           Scope="perMachine"
+           Language="1033">
+
+    <SummaryInformation Description="Lanternleaf $(var.Version) - FB2, TXT and PDF book reader" />
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <!-- Add/Remove Programs entry -->
+    <Icon Id="AppIcon.ico" SourceFile="..\res\lanternleaf.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
+    <Property Id="ARPCONTACT" Value="Vitali Pinzari" />
+
+    <!-- Wizard: welcome, MIT licence, install folder, progress, finish -->
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Lanternleaf" />
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="Lanternleaf" Level="1" AllowAbsent="no">
+      <ComponentGroupRef Id="ProgramFiles" />
+      <ComponentRef Id="Program" />
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+
+    <!-- Start menu shortcut. Windows Installer wants a shortcut that is not advertised to sit in its own
+         component with an HKCU key path (ICE43/ICE57); the shortcut shows the exe's own icon. -->
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Component Id="StartMenuShortcut">
+        <Shortcut Id="StartMenuShortcut" Name="Lanternleaf" Description="Read FB2, TXT and PDF books"
+                  Target="[INSTALLFOLDER]Lanternleaf.exe" WorkingDirectory="INSTALLFOLDER" />
+        <RegistryValue Root="HKCU" Key="Software\Lanternleaf\Installer" Name="StartMenuShortcut" Type="integer"
+                       Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <!-- The program itself and its file associations -->
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="Program" Bitness="always64">
+        <File Id="LanternleafExe" Name="Lanternleaf.exe" Source="$(var.ReleaseDir)\$(var.ExeName)" KeyPath="yes" />
+
+        <!-- .fb2 opens in Lanternleaf; Windows still lets the user pick another default -->
+        <ProgId Id="Lanternleaf.Book" Description="FictionBook book" Icon="LanternleafExe" IconIndex="0"
+                Advertise="no">
+          <Extension Id="fb2" ContentType="application/x-fictionbook+xml">
+            <Verb Id="open" Command="Open" TargetFile="LanternleafExe" Argument="&quot;%1&quot;" />
+          </Extension>
+        </ProgId>
+
+        <!-- "Open with > Lanternleaf" for .fb2, .txt, .pdf and zipped books, without taking over .txt, .pdf or .zip -->
+        <RegistryKey Root="HKLM" Key="Software\Classes\Applications\Lanternleaf.exe">
+          <RegistryValue Name="FriendlyAppName" Value="Lanternleaf" Type="string" />
+          <RegistryValue Key="shell\open\command" Value="&quot;[#LanternleafExe]&quot; &quot;%1&quot;" Type="string" />
+          <RegistryValue Key="SupportedTypes" Name=".fb2" Value="" Type="string" />
+          <RegistryValue Key="SupportedTypes" Name=".txt" Value="" Type="string" />
+          <RegistryValue Key="SupportedTypes" Name=".pdf" Value="" Type="string" />
+          <RegistryValue Key="SupportedTypes" Name=".zip" Value="" Type="string" />
+        </RegistryKey>
+        <RegistryValue Root="HKLM" Key="Software\Classes\.fb2\OpenWithProgids" Name="Lanternleaf.Book" Value=""
+                       Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.txt\OpenWithList\Lanternleaf.exe" Value=""
+                       Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.pdf\OpenWithList\Lanternleaf.exe" Value=""
+                       Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.zip\OpenWithList\Lanternleaf.exe" Value=""
+                       Type="string" />
+      </Component>
+    </DirectoryRef>
+
+    <!-- Everything else in release\Windows: VC++ runtime DLLs, notices, assets\ (fonts, hyphenation, licences).
+         Program files of every version are left out: older ones stay in the release folder after a version bump. -->
+    <ComponentGroup Id="ProgramFiles" Directory="INSTALLFOLDER">
+      <Files Include="$(var.ReleaseDir)\**">
+        <Exclude Files="$(var.ReleaseDir)\Lanternleaf*.exe" />
+      </Files>
+    </ComponentGroup>
+  </Package>
+</Wix>
+```
+
+## `installer/License.rtf`
+
+ASCII, LF line endings, ends with a newline.
+
+```text
+{\rtf1\ansi\ansicpg1252\deff0{\fonttbl{\f0\fswiss\fcharset0 Segoe UI;}}
+\viewkind4\uc1\pard\sa120\f0\fs18
+\b MIT License\b0\par
+Copyright (c) 2026 Vitali Pinzari\par
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:\par
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.\par
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.\par
+\b Third-party components\b0\par
+Lanternleaf includes third-party software and fonts (SDL3, PT Sans and PT Serif under the SIL Open Font License, hyphenation patterns and others). Their licences are installed with the program in THIRD-PARTY-NOTICES.txt and the assets\\licenses folder.\par
 }
 ```
